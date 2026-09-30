@@ -117,13 +117,14 @@ function saveSettings() {
     localStorage.setItem('msc_gyroS',      settings.gyroSensitivity);
     localStorage.setItem('msc_lookS',      settings.lookSensitivity);
     localStorage.setItem('msc_aiTrainBtn', settings.aiTrainButtonVisible);
+    if (typeof AudioEngine !== 'undefined') AudioEngine.updateVolume();
 }
 
 // ── Audio ──
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 const Sound = {
     play(freq, type, duration, vol) {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
+        if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
         const osc  = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         const scaledVol = vol * (settings.masterVolume / 100);
@@ -134,25 +135,21 @@ const Sound = {
         osc.connect(gain); gain.connect(audioCtx.destination);
         osc.start(); osc.stop(audioCtx.currentTime + duration);
     },
-    shoot()       { this.play(400,  'square',   0.1,  0.05); },
-    explode()     { this.play(60,   'sawtooth', 0.5,  0.12); },
-    pickup()      { this.play(900,  'sine',     0.2,  0.1);  },
-    reload()      { this.play(250,  'triangle', 0.2,  0.04); },
-    wave()        { this.play(600,  'sine',     0.6,  0.08); },
-    hit()         { this.play(150,  'sawtooth', 0.15, 0.08); },
-    boost()       { this.play(1200, 'sine',     0.3,  0.06); },
-    bomberBoom()  { this.play(40, 'sawtooth', 0.9, 0.18); this.play(80, 'sine', 0.6, 0.12); },
-    secondary()   { this.play(200, 'sawtooth', 0.25, 0.14); this.play(80, 'sawtooth', 0.6, 0.16); },
-    boss()        { this.play(60,  'sawtooth', 0.7,  0.15); },
-    achievement() {
-        this.play(600, 'sine', 0.15, 0.06);
-        setTimeout(() => this.play(800,  'sine', 0.15, 0.06), 100);
-        setTimeout(() => this.play(1000, 'sine', 0.2,  0.08), 220);
-    },
-    rankUp() {
-        this.play(440, 'sine', 0.25, 0.06);
-        setTimeout(() => this.play(550, 'sine', 0.25, 0.06), 120);
-        setTimeout(() => this.play(660, 'sine', 0.25, 0.06), 240);
-        setTimeout(() => this.play(880, 'sine', 0.35, 0.08), 380);
-    }
+    shoot()       { if (typeof AudioEngine !== 'undefined') AudioEngine.playShoot(); else this.play(400, 'square', 0.1, 0.05); },
+    explode()     { if (typeof AudioEngine !== 'undefined') AudioEngine.playExplosion(); else this.play(60, 'sawtooth', 0.5, 0.12); },
+    pickup()      { if (typeof AudioEngine !== 'undefined') AudioEngine.playPickup(); else this.play(900, 'sine', 0.2, 0.1); },
+    reload()      { if (typeof AudioEngine !== 'undefined') AudioEngine.playReload(); else this.play(250, 'triangle', 0.2, 0.04); },
+    wave()        { if (typeof AudioEngine !== 'undefined') AudioEngine.playWaveComplete(); else this.play(600, 'sine', 0.6, 0.08); },
+    hit()         { if (typeof AudioEngine !== 'undefined') AudioEngine.playDamage(); else this.play(150, 'sawtooth', 0.15, 0.08); },
+    enemyHit()    { if (typeof AudioEngine !== 'undefined') AudioEngine.playHit(); else this.play(1200, 'sine', 0.05, 0.1); },
+    headshot()    { if (typeof AudioEngine !== 'undefined') AudioEngine.playHeadshot(); else this.play(1800, 'sine', 0.1, 0.15); },
+    kill(combo=1) { if (typeof AudioEngine !== 'undefined') AudioEngine.playKill(combo); else this.play(80, 'sawtooth', 0.3, 0.15); },
+    boost()       { if (typeof AudioEngine !== 'undefined') AudioEngine.playBoost(); else this.play(1200, 'sine', 0.3, 0.06); },
+    bomberBoom()  { if (typeof AudioEngine !== 'undefined') AudioEngine.playBomberBoom(); else { this.play(40, 'sawtooth', 0.9, 0.18); this.play(80, 'sine', 0.6, 0.12); } },
+    secondary()   { if (typeof AudioEngine !== 'undefined') AudioEngine.playSecondary(); else { this.play(200, 'sawtooth', 0.25, 0.14); this.play(80, 'sawtooth', 0.6, 0.16); } },
+    boss()        { if (typeof AudioEngine !== 'undefined') AudioEngine.playBossWarning(); else this.play(60, 'sawtooth', 0.7, 0.15); },
+    uiClick()     { if (typeof AudioEngine !== 'undefined') AudioEngine.playUIClick(); },
+    uiHover()     { if (typeof AudioEngine !== 'undefined') AudioEngine.playUIHover(); },
+    achievement() { if (typeof AudioEngine !== 'undefined') AudioEngine.playLevelUp(); else { this.play(600, 'sine', 0.15, 0.06); setTimeout(() => this.play(800, 'sine', 0.15, 0.06), 100); setTimeout(() => this.play(1000, 'sine', 0.2, 0.08), 220); } },
+    rankUp()      { if (typeof AudioEngine !== 'undefined') AudioEngine.playLevelUp(); else { this.play(440, 'sine', 0.25, 0.06); setTimeout(() => this.play(550, 'sine', 0.25, 0.06), 120); setTimeout(() => this.play(660, 'sine', 0.25, 0.06), 240); setTimeout(() => this.play(880, 'sine', 0.35, 0.08), 380); } }
 };

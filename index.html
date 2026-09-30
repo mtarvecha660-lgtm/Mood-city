@@ -7,55 +7,70 @@
     <meta name="description" content="Urban Combat Protocol v4.2 — High-Vis Protocol Enabled. 3D browser-based first-person shooter built with Three.js.">
     <meta property="og:title" content="Mood Shift City: Ultra Vis">
     <meta property="og:description" content="Urban Combat Protocol v4.2 — High-Vis Protocol Enabled. 3D browser-based first-person shooter built with Three.js.">
-    <link rel="stylesheet" href="css/style.css">
+    
+    <!-- Google Fonts for Gen-Z Arcade Aesthetic -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Space+Grotesk:wght@500;700;800&family=Syne:wght@700;800;900&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="css/style.css?v=10">
 </head>
 <body>
 
 <!-- Rotate Device Overlay -->
 <div id="rotate-overlay">
-    <span class="rotate-icon">📱</span>
-    <p>ROTATE YOUR DEVICE<br>TO LANDSCAPE</p>
+    <div class="rotate-box">
+        <span class="rotate-icon">📱</span>
+        <div class="rotate-title">ROTATE DEVICE</div>
+        <p>FLIP TO LANDSCAPE TO ENTER THE ZONE</p>
+    </div>
 </div>
 
 <!-- ══ MAIN MENU ══ -->
 <div id="menu">
     <div id="menu-grid"></div>
     <div class="scanlines-overlay"></div>
+    <div id="menu-ambient-glow"></div>
     <div id="menu-rain"></div>
 
     <div id="menu-content">
         <div id="menu-logo">
-            <div id="menu-tag">// URBAN COMBAT PROTOCOL v4.2 //</div>
-            <h1 id="menu-title" data-text="MOOD SHIFT CITY">MOOD SHIFT CITY</h1>
-            <div id="menu-sub">HIGH&#8209;VIS PROTOCOL ENABLED</div>
+            <div id="menu-tag"><span class="status-pulse-dot"></span> HYPER-ARCADE PROTOCOL // v4.2</div>
+            <h1 id="menu-title" data-text="MOOD SHIFT CITY">
+                <span class="title-p1">MOOD SHIFT</span>
+                <span class="title-p2">CITY</span>
+            </h1>
+            <div id="menu-sub"><span class="hero-chip">SURVIVE THE CHAOS</span></div>
         </div>
 
-        <div id="menu-best">
-            <span class="menu-label">HIGHEST SIGNAL</span>
-            <span id="menu-hs" class="menu-hs-val">0</span>
-        </div>
+        <div class="menu-stats-bar">
+            <div id="menu-best" class="glass-pill">
+                <span class="menu-label">TOP SIGNAL</span>
+                <span id="menu-hs" class="menu-hs-val">0</span>
+            </div>
 
-        <!-- Rank row -->
-        <div id="menu-rank-row">
-            <span class="menu-label">RANK</span>
-            <span id="menu-rank-val" class="menu-rank-name">ROOKIE</span>
-            <span id="menu-xp-val" class="menu-label">0 XP</span>
-            <div id="menu-rank-bar"><div id="menu-rank-prog"></div></div>
-        </div>
+            <!-- Rank row -->
+            <div id="menu-rank-row" class="glass-pill">
+                <span class="menu-label">RANK</span>
+                <span id="menu-rank-val" class="menu-rank-name">ROOKIE</span>
+                <span id="menu-xp-val" class="menu-xp-label">0 XP</span>
+                <div id="menu-rank-bar"><div id="menu-rank-prog"></div></div>
+            </div>
 
-        <!-- Selected operative display -->
-        <div id="menu-operative-row">
-            <span class="menu-label">OPERATIVE</span>
-            <span id="menu-selected-char" class="operative-name" style="color:#00ffff;">&#9658; STRIKER</span>
+            <!-- Selected operative display -->
+            <div id="menu-operative-row" class="glass-pill" onclick="openCodex('operatives')">
+                <span class="menu-label">LOADOUT</span>
+                <span id="menu-selected-char" class="operative-name">&#9658; STRIKER</span>
+            </div>
         </div>
 
         <!-- Difficulty selector -->
         <div id="difficulty-row">
-            <span class="menu-label">DIFFICULTY</span>
+            <span class="menu-label">THREAT LEVEL</span>
             <div id="diff-buttons">
-                <button class="diff-btn active" id="diff-standard" onclick="setDifficulty('standard')">STANDARD</button>
-                <button class="diff-btn" id="diff-veteran" onclick="setDifficulty('veteran')">VETERAN</button>
-                <button class="diff-btn" id="diff-ghost" onclick="setDifficulty('ghost')">GHOST</button>
+                <button class="diff-btn active" id="diff-standard" onclick="setDifficulty('standard'); if (typeof Sound !== 'undefined') Sound.uiClick();">STANDARD</button>
+                <button class="diff-btn" id="diff-veteran" onclick="setDifficulty('veteran'); if (typeof Sound !== 'undefined') Sound.uiClick();">VETERAN</button>
+                <button class="diff-btn" id="diff-ghost" onclick="setDifficulty('ghost'); if (typeof Sound !== 'undefined') Sound.uiClick();">GHOST</button>
             </div>
         </div>
 
@@ -63,25 +78,27 @@
             <button id="start-btn" onclick="startGame()">
                 <span class="btn-arrow">&#9658;</span> DEPLOY
             </button>
-            <button id="codex-btn" onclick="openCodex('operatives')">
-                &#9776; INTEL DATABASE
-            </button>
-            <button id="tutorial-btn" onclick="openTutorial()">
-                ? HOW TO PLAY
-            </button>
-            <button id="settings-btn" onclick="openSettings()">
-                &#9881; SETTINGS
+            <div class="menu-btn-row">
+                <button id="codex-btn" class="secondary-menu-btn" onclick="openCodex('operatives'); if (typeof Sound !== 'undefined') Sound.uiClick();">
+                    ✦ INTEL & LOADOUT
+                </button>
+                <button id="settings-btn" class="secondary-menu-btn" onclick="openSettings(); if (typeof Sound !== 'undefined') Sound.uiClick();">
+                    ⚙ SETTINGS
+                </button>
+            </div>
+            <button id="tutorial-btn" class="subtle-menu-btn" onclick="openTutorial(); if (typeof Sound !== 'undefined') Sound.uiClick();">
+                ? COMBAT BRIEFING
             </button>
         </div>
 
         <div id="menu-controls">
-            <div class="menu-section-label">— CONTROL SCHEME —</div>
+            <div class="menu-section-label">HOTKEYS</div>
             <div class="ctrl-grid">
-                <div class="ctrl-key">W A S D</div><div class="ctrl-act">MOVE</div>
-                <div class="ctrl-key">MOUSE</div><div class="ctrl-act">AIM</div>
-                <div class="ctrl-key">CLICK</div><div class="ctrl-act">FIRE</div>
-                <div class="ctrl-key">R</div><div class="ctrl-act">RELOAD</div>
-                <div class="ctrl-key">F</div><div class="ctrl-act">ROCKET (if held)</div>
+                <div class="ctrl-tag"><span class="ctrl-key">WASD</span> <span class="ctrl-act">MOVE</span></div>
+                <div class="ctrl-tag"><span class="ctrl-key">MOUSE</span> <span class="ctrl-act">AIM & FIRE</span></div>
+                <div class="ctrl-tag"><span class="ctrl-key">R</span> <span class="ctrl-act">RELOAD</span></div>
+                <div class="ctrl-tag"><span class="ctrl-key">F</span> <span class="ctrl-act">ROCKET</span></div>
+                <div class="ctrl-tag"><span class="ctrl-key">ALT+T</span> <span class="ctrl-act">AI SIM</span></div>
             </div>
         </div>
     </div>
@@ -89,7 +106,7 @@
 
 <!-- ══ TUTORIAL ══ -->
 <div id="tutorial-overlay" style="display:none;">
-    <div class="menu-grid-bg"></div> <!-- Changed from id="menu-grid" to class="menu-grid-bg" to avoid duplicate IDs -->
+    <div class="menu-grid-bg"></div>
     <div class="scanlines-overlay"></div>
     <div id="tut-slide-area"></div>
 </div>
@@ -99,48 +116,50 @@
 
 <!-- ══ SETTINGS ══ -->
 <div id="settings" style="display:none;">
-    <div class="menu-grid-bg"></div> <!-- Changed from id="menu-grid" to class="menu-grid-bg" to avoid duplicate IDs -->
+    <div class="menu-grid-bg"></div>
     <div class="scanlines-overlay"></div>
 
-    <div id="settings-header">
-        <div class="back-link" onclick="closeSettings()">&#8592; BACK</div>
-        <div id="settings-title-text">// SETTINGS //</div>
-    </div>
-
-    <div id="settings-body">
-        <div class="settings-section">
-            <div class="settings-section-label">// AUDIO</div>
-            <div class="settings-row">
-                <span class="settings-label">MASTER VOLUME</span>
-                <input type="range" min="0" max="100" class="settings-slider" id="vol-slider"
-                       oninput="settings.masterVolume=+this.value;document.getElementById('vol-val').innerText=this.value;saveSettings();">
-                <span class="settings-val" id="vol-val">80</span>
-            </div>
+    <div id="settings-card">
+        <div id="settings-header">
+            <div class="back-link" onclick="closeSettings(); if (typeof Sound !== 'undefined') Sound.uiClick();">&#8592; BACK</div>
+            <div id="settings-title-text">SYSTEM PROTOCOLS</div>
         </div>
 
-        <div class="settings-section" id="settings-controls-section">
-            <div class="settings-section-label">// CONTROLS</div>
-            <div class="settings-row">
-                <span class="settings-label">AI TRAIN BUTTON</span>
-                <button class="settings-toggle"
-                        id="ai-train-visibility-toggle"
-                        onclick="toggleAITrainButtonSetting()">ON</button>
+        <div id="settings-body">
+            <div class="settings-section">
+                <div class="settings-section-label">// AUDIO HARDWARE</div>
+                <div class="settings-row">
+                    <span class="settings-label">MASTER VOLUME</span>
+                    <input type="range" min="0" max="100" class="settings-slider" id="vol-slider"
+                           oninput="settings.masterVolume=+this.value;document.getElementById('vol-val').innerText=this.value;saveSettings();">
+                    <span class="settings-val" id="vol-val">80</span>
+                </div>
             </div>
-            <div class="settings-row" id="gyro-row">
-                <span class="settings-label">GYROSCOPE <span style="color:rgba(255,120,0,0.6);font-size:9px;letter-spacing:1px">(EXPERIMENTAL)</span></span>
-                <button class="settings-toggle" id="gyro-toggle" onclick="toggleGyroSetting()">OFF</button>
-            </div>
-            <div class="settings-row" id="gyro-sens-row">
-                <span class="settings-label">GYRO SENSITIVITY</span>
-                <input type="range" min="1" max="20" class="settings-slider" id="gyro-sens-slider"
-                       oninput="settings.gyroSensitivity=+this.value;document.getElementById('gyro-sens-val').innerText=this.value;saveSettings();">
-                <span class="settings-val" id="gyro-sens-val">10</span>
-            </div>
-            <div class="settings-row">
-                <span class="settings-label">LOOK SENSITIVITY</span>
-                <input type="range" min="1" max="20" class="settings-slider" id="look-sens-slider"
-                       oninput="settings.lookSensitivity=+this.value;document.getElementById('look-sens-val').innerText=this.value;saveSettings();">
-                <span class="settings-val" id="look-sens-val">7</span>
+
+            <div class="settings-section" id="settings-controls-section">
+                <div class="settings-section-label">// COMBAT INPUT & AI</div>
+                <div class="settings-row">
+                    <span class="settings-label">AI TRAIN BUTTON</span>
+                    <button class="settings-toggle"
+                            id="ai-train-visibility-toggle"
+                            onclick="toggleAITrainButtonSetting(); if (typeof Sound !== 'undefined') Sound.uiClick();">ON</button>
+                </div>
+                <div class="settings-row" id="gyro-row">
+                    <span class="settings-label">GYROSCOPE <span class="exp-tag">EXP</span></span>
+                    <button class="settings-toggle" id="gyro-toggle" onclick="toggleGyroSetting(); if (typeof Sound !== 'undefined') Sound.uiClick();">OFF</button>
+                </div>
+                <div class="settings-row" id="gyro-sens-row">
+                    <span class="settings-label">GYRO SENSITIVITY</span>
+                    <input type="range" min="1" max="20" class="settings-slider" id="gyro-sens-slider"
+                           oninput="settings.gyroSensitivity=+this.value;document.getElementById('gyro-sens-val').innerText=this.value;saveSettings();">
+                    <span class="settings-val" id="gyro-sens-val">10</span>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">LOOK SENSITIVITY</span>
+                    <input type="range" min="1" max="20" class="settings-slider" id="look-sens-slider"
+                           oninput="settings.lookSensitivity=+this.value;document.getElementById('look-sens-val').innerText=this.value;saveSettings();">
+                    <span class="settings-val" id="look-sens-val">7</span>
+                </div>
             </div>
         </div>
     </div>
@@ -148,16 +167,16 @@
 
 <!-- ══ INTEL DATABASE (CODEX) ══ -->
 <div id="codex" style="display:none;">
-    <div class="menu-grid-bg"></div> <!-- Changed from id="menu-grid" to class="menu-grid-bg" to avoid duplicate IDs -->
+    <div class="menu-grid-bg"></div>
     <div class="scanlines-overlay"></div>
 
     <div id="codex-header">
-        <div class="back-link" onclick="closeCodex()">&#8592; BACK</div>
-        <div id="codex-title-text">// INTEL DATABASE //</div>
+        <div class="back-link" onclick="closeCodex(); if (typeof Sound !== 'undefined') Sound.uiClick();">&#8592; BACK</div>
+        <div id="codex-title-text">TACTICAL ARCHIVES</div>
         <div id="codex-tabs">
-            <button class="codex-tab" id="tab-btn-operatives" onclick="switchCodexTab('operatives')">OPERATIVES</button>
-            <button class="codex-tab" id="tab-btn-threats" onclick="switchCodexTab('threats')">THREATS</button>
-            <button class="codex-tab" id="tab-btn-drops" onclick="switchCodexTab('drops')">DROPS</button>
+            <button class="codex-tab" id="tab-btn-operatives" onclick="switchCodexTab('operatives'); if (typeof Sound !== 'undefined') Sound.uiClick();">OPERATIVES</button>
+            <button class="codex-tab" id="tab-btn-threats" onclick="switchCodexTab('threats'); if (typeof Sound !== 'undefined') Sound.uiClick();">THREATS</button>
+            <button class="codex-tab" id="tab-btn-drops" onclick="switchCodexTab('drops'); if (typeof Sound !== 'undefined') Sound.uiClick();">DROPS</button>
         </div>
     </div>
 
@@ -167,7 +186,7 @@
         <div id="codex-main">
             <div id="codex-preview-area">
                 <canvas id="preview-canvas" width="220" height="220"></canvas>
-                <div id="preview-label"></div>
+                <div id="preview-label">3D SPECIMEN SCAN</div>
             </div>
             <div id="codex-info-area">
                 <div id="codex-info"></div>
@@ -180,10 +199,12 @@
 <div id="pause-menu" style="display:none;">
     <div class="scanlines-overlay"></div>
     <div id="pause-content">
-        <div id="pause-tag">// SIGNAL PAUSED //</div>
+        <div id="pause-tag"><span class="status-pulse-dot"></span> TACTICAL FEED SUSPENDED</div>
         <div id="pause-title">STANDBY</div>
-        <button class="pause-btn" onclick="resumeGame()">&#9658; RESUME</button>
-        <button class="pause-btn" id="pause-exit-btn" onclick="exitToMenu()">&#8592; EXIT TO MENU</button>
+        <div class="pause-actions">
+            <button class="pause-btn" onclick="resumeGame(); if (typeof Sound !== 'undefined') Sound.uiClick();">&#9658; RESUME</button>
+            <button class="pause-btn secondary" id="pause-exit-btn" onclick="exitToMenu()">&#8592; ABORT TO MENU</button>
+        </div>
     </div>
 </div>
 
@@ -192,28 +213,66 @@
 
 <!-- ══ BOSS HEALTH BAR ══ -->
 <div id="boss-bar-wrapper" style="display:none;">
-    <div id="boss-label">// OVERLORD //</div>
+    <div class="boss-bar-header">
+        <div id="boss-label">OVERLORD // HOSTILE COMMAND</div>
+        <div id="boss-phase-label">PHASE I</div>
+    </div>
     <div id="boss-bar-track"><div id="boss-bar-fill"></div></div>
-    <div id="boss-phase-label">PHASE I</div>
 </div>
 
 <!-- ══ HUD ══ -->
 <div id="ui" style="display:none;">
-    HP: <span id="hp-val" style="color:#ff0040;">100</span>% | AMMO: <span id="ammo-val" style="color:#00ffff;">12</span>/<span id="reserve-val">48</span><br>
-    SCORE: <span id="score-val">0</span>
-    <span id="combo-display" style="display:none;color:#ffff00;margin-left:8px;">&#215;<span id="combo-val">1</span></span>
-    | <span id="wave-status" style="color:#ffff00;">WAVE 1</span><br>
-    <span style="color:#0ff">ENEMIES: <span id="enemies-left">0</span></span>
-    <div id="reload-msg" onclick="reload()">&#x21BA; RELOAD &nbsp;<span style="opacity:0.5;font-size:11px">[R]</span></div>
-    <div id="secondary-hud" style="display:none;">ROCKET: <span id="secondary-ammo-val">3</span> &nbsp;<span style="color:rgba(255,255,255,0.4);font-size:10px">[F]</span></div>
+    <!-- Top Left: Operative & Vitality -->
+    <div class="hud-module hud-vitality">
+        <div class="vitality-header">
+            <span class="hud-op-tag" id="hud-op-name">STRIKER</span>
+            <span class="vitality-num"><span id="hp-val">100</span><span class="vitality-pct">%</span></span>
+        </div>
+        <div class="vitality-bar-track">
+            <div class="vitality-bar-fill" id="hp-fill"></div>
+        </div>
+    </div>
+
+    <!-- Top Center: Wave & Hostiles -->
+    <div class="hud-module hud-wave-center">
+        <div class="wave-badge" id="wave-status">WAVE 1</div>
+        <div class="enemies-pill">HOSTILES: <span id="enemies-left">0</span></div>
+    </div>
+
+    <!-- Top Right: Score & Multiplier -->
+    <div class="hud-module hud-score-panel">
+        <div class="score-label">SIGNAL SCORE</div>
+        <div class="score-value-row">
+            <span id="score-val">0</span>
+            <span id="combo-display" style="display:none;" class="combo-pill">&#215;<span id="combo-val">1</span></span>
+        </div>
+    </div>
+
+    <!-- Bottom Center/Right: Munitions & Secondary -->
+    <div class="hud-module hud-munitions">
+        <div class="munitions-row">
+            <div class="ammo-counter">
+                <span id="ammo-val">12</span>
+                <span class="ammo-slash">/</span>
+                <span id="reserve-val">48</span>
+            </div>
+            <div id="secondary-hud" style="display:none;" class="secondary-ammo-pill">
+                <span class="rocket-icon">🚀</span> <span id="secondary-ammo-val">3</span> <span class="key-hint">[F]</span>
+            </div>
+        </div>
+        <div id="reload-msg" onclick="reload()">&#x21BA; RELOAD NOW <span class="key-hint">[R]</span></div>
+    </div>
 </div>
+
+<!-- Floating Combat Feedback Layer (Kill pops, headshots, combos) -->
+<div id="feedback-layer"></div>
 
 <!-- Active powerup indicators -->
 <div id="boosts-hud" style="display:none;">
-    <span id="boost-speed"     class="boost-tag boost-speed"     style="display:none;">SPEED+</span>
-    <span id="boost-shield"    class="boost-tag boost-shield"    style="display:none;">SHIELD</span>
-    <span id="boost-rapid"     class="boost-tag boost-rapid"     style="display:none;">RAPID+</span>
-    <span id="boost-overclock" class="boost-tag boost-overclock" style="display:none;">OVERCLOCK</span>
+    <span id="boost-speed"     class="boost-tag boost-speed"     style="display:none;">⚡ SPEED+</span>
+    <span id="boost-shield"    class="boost-tag boost-shield"    style="display:none;">🛡 SHIELD</span>
+    <span id="boost-rapid"     class="boost-tag boost-rapid"     style="display:none;">🔥 RAPID+</span>
+    <span id="boost-overclock" class="boost-tag boost-overclock" style="display:none;">⚡ OVERCLOCK</span>
 </div>
 
 <!-- Wave bonus flash -->
@@ -235,40 +294,50 @@
 <div id="muzzle-flash"></div>
 
 <!-- Minimap -->
-<canvas id="minimap"></canvas>
+<div id="minimap-wrapper">
+    <canvas id="minimap"></canvas>
+</div>
 
-<!-- Mobile Controls (hidden on desktop, shown via JS on mobile) -->
+<!-- Mobile Controls -->
 <div id="mobile-controls">
     <div id="joystick-container"><div id="joystick-knob"></div></div>
-    <div id="fire-btn"      class="touch-btn">FIRE</div>
-    <div id="reload-btn"    class="touch-btn">RELOAD</div>
+    <div id="fire-btn"      class="touch-btn touch-btn-fire">FIRE</div>
+    <div id="reload-btn"    class="touch-btn touch-btn-reload">&#x21BA;</div>
     <div id="rocket-btn"    class="touch-btn touch-btn-rocket">🚀</div>
     <div id="pause-touch-btn" onclick="togglePause()">II</div>
 </div>
 
-<!-- Crosshair -->
-<div id="crosshair" style="display:none;"></div>
+<!-- Crosshair with dynamic hitmarker -->
+<div id="crosshair" style="display:none;">
+    <div class="ch-line ch-top"></div>
+    <div class="ch-line ch-bottom"></div>
+    <div class="ch-line ch-left"></div>
+    <div class="ch-line ch-right"></div>
+    <div class="ch-center"></div>
+    <div id="hit-marker" class="hit-marker"></div>
+</div>
 
 <!-- Scripts -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="js/state.js?v=9"></script>
-<script src="js/mobile.js?v=8"></script>
-<script src="js/controls.js?v=8"></script>
-<script src="js/tutorial.js?v=8"></script>
-<script src="js/game.js?v=9"></script>
-<script src="js/ai-player.js?v=4"></script>
+<script src="js/state.js?v=10"></script>
+<script src="js/audio.js?v=10"></script>
+<script src="js/mobile.js?v=10"></script>
+<script src="js/controls.js?v=10"></script>
+<script src="js/tutorial.js?v=10"></script>
+<script src="js/game.js?v=10"></script>
+<script src="js/ai-player.js?v=10"></script>
 <script>
 (function() {
     const rain = document.getElementById('menu-rain');
-    if (rain) { // Added a check to ensure 'rain' element exists before trying to append children
-        for (let i = 0; i < 40; i++) {
+    if (rain) {
+        for (let i = 0; i < 45; i++) {
             const drop = document.createElement('div');
             drop.className = 'rain-drop';
             drop.style.left              = Math.random() * 100 + '%';
-            drop.style.animationDuration = (0.6 + Math.random() * 1.2) + 's';
+            drop.style.animationDuration = (0.5 + Math.random() * 0.9) + 's';
             drop.style.animationDelay    = (Math.random() * 2) + 's';
-            drop.style.opacity           = 0.15 + Math.random() * 0.25;
-            drop.style.height            = (40 + Math.random() * 60) + 'px';
+            drop.style.opacity           = 0.2 + Math.random() * 0.35;
+            drop.style.height            = (40 + Math.random() * 70) + 'px';
             rain.appendChild(drop);
         }
     }

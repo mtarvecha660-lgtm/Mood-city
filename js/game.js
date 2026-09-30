@@ -628,6 +628,32 @@ function shoot() {
     }
 }
 
+// ── Combat Feedback & Floating Layer ──
+
+function triggerHitMarker(isCrit = false) {
+    const hm = document.getElementById('hit-marker');
+    if (!hm) return;
+    hm.className = 'hit-marker active' + (isCrit ? ' crit' : '');
+    clearTimeout(hm._timer);
+    hm._timer = setTimeout(() => {
+        hm.className = 'hit-marker';
+    }, 110);
+}
+
+function showFloatingFeedback(text, type = 'score', screenX, screenY) {
+    const layer = document.getElementById('feedback-layer');
+    if (!layer) return;
+    const el = document.createElement('div');
+    el.className = `floating-pop pop-${type}`;
+    el.innerText = text;
+    const x = screenX || (window.innerWidth / 2 + (Math.random() - 0.5) * 80);
+    const y = screenY || (window.innerHeight / 2 - 40 + (Math.random() - 0.5) * 60);
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    layer.appendChild(el);
+    setTimeout(() => { if (el.parentNode) el.remove(); }, 820);
+}
+
 function fireSecondary() {
     if (!gameRunning || !hasSecondaryWeapon || secondaryAmmo <= 0) return;
     secondaryAmmo--;
@@ -655,12 +681,18 @@ function rocketExplode(pos) {
     createImpact(pos, 0xff4400, 40);
     shakeAmount = 0.5;
     const aoeR = 6;
+    let hitCount = 0;
     for (let e of enemies) {
         if (pos.distanceTo(e.mesh.position) < aoeR) {
             e.hp -= 100;
             e.hitFlash = 1.0;
             shotsHit++;
+            hitCount++;
         }
+    }
+    if (hitCount > 0) {
+        triggerHitMarker(true);
+        if (typeof Sound !== 'undefined' && Sound.enemyHit) Sound.enemyHit();
     }
 }
 
@@ -982,7 +1014,28 @@ function drawMinimap() {
 // ── HUD ──
 
 function updateUI() {
-    document.getElementById('hp-val').innerText      = Math.max(0, Math.ceil(hp));
+    const hpVal = Math.max(0, Math.ceil(hp));
+    const hpEl = document.getElementById('hp-val');
+    if (hpEl) hpEl.innerText = hpVal;
+
+    // Vitality bar & low-health warning
+    const hpFill = document.getElementById('hp-fill');
+    if (hpFill) {
+        const pct = Math.max(0, Math.min(100, (hp / playerMaxHp) * 100));
+        hpFill.style.width = pct + '%';
+        if (pct < 30) {
+            hpFill.style.background = 'linear-gradient(90deg, #ff0040, #ff4400)';
+            hpFill.style.boxShadow = '0 0 14px rgba(255, 0, 64, 0.7)';
+        } else {
+            hpFill.style.background = 'linear-gradient(90deg, #00ff66, #00f0ff)';
+            hpFill.style.boxShadow = '0 0 10px rgba(0, 255, 102, 0.4)';
+        }
+    }
+    const opEl = document.getElementById('hud-op-name');
+    if (opEl && selectedChar) {
+        opEl.innerText = selectedChar.toUpperCase();
+    }
+
     document.getElementById('ammo-val').innerText    = ammo;
     document.getElementById('reserve-val').innerText = reserve;
     document.getElementById('score-val').innerText   = score;
@@ -1139,6 +1192,8 @@ function animate() {
                 e.hitFlash = 1.0;
                 hitEnemy = true;
                 shotsHit++;
+                triggerHitMarker(false);
+                if (typeof Sound !== 'undefined' && Sound.enemyHit) Sound.enemyHit();
                 if (!b.isRocket) createImpact(nextPos, 0xff0040, 12);
                 break;
             }
@@ -1225,6 +1280,9 @@ function animate() {
             totalEnemiesKilled++;
             localStorage.setItem('msc_total_kills', totalEnemiesKilled);
 
+            // Floating score popup
+            showFloatingFeedback(`+${actualPts}`, 'score');
+
             // Combo system
             if (comboDecayTimer) clearTimeout(comboDecayTimer);
             comboCount++;
@@ -1232,9 +1290,16 @@ function animate() {
             else if (comboCount >= 4) comboMultiplier = 3;
             else if (comboCount >= 2) comboMultiplier = 2;
             else                      comboMultiplier = 1;
+
+            if (comboMultiplier > 1) {
+                showFloatingFeedback(`COMBO ×${comboMultiplier}!`, 'clean');
+            }
+
             comboDecayTimer = setTimeout(() => {
                 comboCount = 0; comboMultiplier = 1;
             }, 2200);
+
+            if (typeof Sound !== 'undefined' && Sound.kill) Sound.kill(comboMultiplier);
 
             checkAchievements();
 

@@ -707,7 +707,11 @@ const NEXUS = (() => {
 
         // Update button
         const btn = document.getElementById('nexus-train-btn');
-        if (btn) { btn.textContent = '■ STOP TRAINING'; btn.classList.add('on'); }
+        if (btn) {
+            btn.innerHTML = '<span class="train-icon">■</span> STOP SIMULATION <span class="train-live-dot"></span>';
+            btn.classList.add('on');
+        }
+        if (typeof AudioEngine !== 'undefined') AudioEngine.playTrainingStart();
 
         // Activate AI frame loop
         if (!active) {
@@ -766,7 +770,11 @@ const NEXUS = (() => {
         if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
 
         const btn = document.getElementById('nexus-train-btn');
-        if (btn) { btn.textContent = '▶ AUTO TRAIN'; btn.classList.remove('on'); }
+        if (btn) {
+            btn.innerHTML = '<span class="train-icon">▶</span> AUTO TRAIN';
+            btn.classList.remove('on');
+        }
+        if (typeof AudioEngine !== 'undefined') AudioEngine.playTrainingStop();
 
         const thud = document.getElementById('nexus-train-hud');
         if (thud) thud.style.display = 'block'; // keep showing final stats
@@ -789,9 +797,10 @@ const NEXUS = (() => {
         patchPointerLock();
         rafId = requestAnimationFrame(frame);
         const btn = document.getElementById('nexus-btn');
-        if (btn) { btn.textContent = '■ NEXUS AI'; btn.classList.add('on'); }
+        if (btn) { btn.innerHTML = '<span class="nexus-pulse-dot"></span> ■ NEXUS ONLINE'; btn.classList.add('on'); }
         const hud = document.getElementById('nexus-hud');
         if (hud) hud.style.display = 'block';
+        if (typeof AudioEngine !== 'undefined') AudioEngine.playNexusActivate();
         log('NEXUS ONLINE');
         updateHUD();
     }
@@ -801,9 +810,10 @@ const NEXUS = (() => {
         active = false;
         if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
         const btn = document.getElementById('nexus-btn');
-        if (btn) { btn.textContent = '▶ NEXUS AI'; btn.classList.remove('on'); }
+        if (btn) { btn.innerHTML = '<span class="nexus-pulse-dot off"></span> ▶ NEXUS AI'; btn.classList.remove('on'); }
         const hud = document.getElementById('nexus-hud');
         if (hud) hud.style.display = 'none';
+        if (typeof AudioEngine !== 'undefined') AudioEngine.playTrainingStop();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -813,41 +823,65 @@ const NEXUS = (() => {
         const el = document.getElementById('nexus-hud');
         if (!el || training) return;
         const hF = player ? hp / playerMaxHp : 0;
-        const hC = hF < 0.3 ? '#ff3040' : hF < 0.55 ? '#ff8800' : '#00ff88';
+        const hC = hF < 0.3 ? '#ff007f' : hF < 0.55 ? '#ffaa00' : '#00ff66';
         const aF = maxClip > 0 ? ammo / maxClip : 0;
         const phaseColors = {
-            HUNT:'#0ff', KITE:'#ff0', SEEK_DROP:'#f46', EVADE_BOMBER:'#f80', IDLE:'#556', FLANK:'#a0f'
+            HUNT:'#00f0ff', KITE:'#ffaa00', SEEK_DROP:'#ff007f', EVADE_BOMBER:'#ff4400', IDLE:'#8892b0', FLANK:'#a855f7'
         };
-        const pC = phaseColors[ai.phase] || '#0fc';
+        const pC = phaseColors[ai.phase] || '#00f0ff';
+        const tgt = getBestTarget();
+        const tgtName = tgt ? (tgt.isBoss ? 'BOSS // OVERLORD' : tgt.name) : 'SCANNING...';
+
         el.innerHTML = `
-<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(0,255,204,0.2);padding-bottom:5px;margin-bottom:7px">
-  <span style="color:#0fc;font-size:12px;letter-spacing:2px;font-weight:bold">◈ NEXUS AI</span>
-  <span style="font-size:9px;padding:2px 8px;border-radius:3px;background:${pC}22;color:${pC};letter-spacing:1px;border:1px solid ${pC}44">${ai.phase}</span>
-</div>
-<div style="margin-bottom:7px">
-  <div style="display:flex;align-items:center;gap:5px;margin-bottom:4px">
-    <span style="color:#445;font-size:9px;width:38px;letter-spacing:1px">HP</span>
-    <div style="flex:1;height:5px;background:#0a0f1a;border-radius:2px;overflow:hidden">
-      <div style="height:100%;width:${(hF*100).toFixed(0)}%;background:${hC};border-radius:2px;transition:width 0.1s"></div></div>
-    <span style="font-size:9px;color:${hC};width:52px;text-align:right">${Math.ceil(hp)}/${playerMaxHp}</span>
+<div class="nexus-hud-header">
+  <div class="nexus-title-col">
+    <span class="nexus-brand">◈ NEXUS COMPANION</span>
+    <span class="nexus-sub">TACTICAL PROTOCOL ACTIVE</span>
   </div>
-  <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">
-    <span style="color:#445;font-size:9px;width:38px;letter-spacing:1px">AMMO</span>
-    <div style="flex:1;height:5px;background:#0a0f1a;border-radius:2px;overflow:hidden">
-      <div style="height:100%;width:${(aF*100).toFixed(0)}%;background:#0ff;border-radius:2px;transition:width 0.1s"></div></div>
-    <span style="font-size:9px;color:#0ff;width:52px;text-align:right">${ammo}+${reserve}</span>
+  <span class="nexus-phase-pill" style="border-color:${pC};color:${pC};background:${pC}18;">${ai.phase}</span>
+</div>
+
+<div class="nexus-target-row">
+  <span class="nexus-lbl">LOCKED TARGET</span>
+  <span class="nexus-val-target" style="color:${tgt ? '#ff007f' : '#8892b0'}">${tgtName}</span>
+</div>
+
+<div class="nexus-bars-col">
+  <div class="nexus-bar-row">
+    <span class="nexus-mini-lbl">OPERATIVE VITALITY</span>
+    <span class="nexus-mini-val" style="color:${hC}">${Math.ceil(hp)}/${playerMaxHp}</span>
   </div>
-  <div style="display:flex;justify-content:space-between;font-size:9px;color:#445">
-    <span>ENEMIES <span style="color:#f46">${enemies ? enemies.length : 0}</span></span>
-    <span>DROPS <span style="color:#a0f">${drops ? drops.length : 0}</span></span>
-    <span>THREAT <span style="color:#f80">${ai.threatScore.toFixed(0)}</span></span>
+  <div class="nexus-bar-track">
+    <div class="nexus-bar-fill" style="width:${(hF*100).toFixed(0)}%;background:${hC};box-shadow:0 0 8px ${hC}"></div>
+  </div>
+
+  <div class="nexus-bar-row" style="margin-top:6px;">
+    <span class="nexus-mini-lbl">MUNITIONS IN CLIP</span>
+    <span class="nexus-mini-val" style="color:#00f0ff">${ammo}/${maxClip}</span>
+  </div>
+  <div class="nexus-bar-track">
+    <div class="nexus-bar-fill" style="width:${(aF*100).toFixed(0)}%;background:#00f0ff;box-shadow:0 0 8px #00f0ff"></div>
   </div>
 </div>
-<div style="border-top:1px solid rgba(0,255,204,0.1);padding-top:5px;margin-bottom:5px">
-${ai.log.slice(0,6).map(l=>`<div style="color:#344;font-size:9px;line-height:1.55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l}</div>`).join('')}
+
+<div class="nexus-grid-metrics">
+  <div class="nexus-metric-box">
+    <span class="nexus-metric-lbl">HOSTILES</span>
+    <span class="nexus-metric-num" style="color:#ff007f">${enemies ? enemies.length : 0}</span>
+  </div>
+  <div class="nexus-metric-box">
+    <span class="nexus-metric-lbl">DROPS</span>
+    <span class="nexus-metric-num" style="color:#00ff66">${drops ? drops.length : 0}</span>
+  </div>
+  <div class="nexus-metric-box">
+    <span class="nexus-metric-lbl">THREAT INDEX</span>
+    <span class="nexus-metric-num" style="color:#ffaa00">${ai.threatScore.toFixed(0)}</span>
+  </div>
 </div>
-<div style="border-top:1px solid rgba(0,255,204,0.1);padding-top:4px;color:#334;font-size:9px;letter-spacing:0.5px">
-  Wave ${typeof wave!=='undefined'?wave:'–'} · Best wave ${mem.bestWave} · Run #${mem.totalRuns}
+
+<div class="nexus-log-container">
+  <div class="nexus-log-title">TELEMETRY FEED</div>
+  ${ai.log.slice(0,4).map(l=>`<div class="nexus-log-line">${l}</div>`).join('')}
 </div>`;
     }
 
@@ -868,7 +902,6 @@ ${ai.log.slice(0,6).map(l=>`<div style="color:#344;font-size:9px;line-height:1.5
         const avgAcc     = trainHistory.length
             ? Math.round(trainHistory.reduce((s,r) => s + r.acc, 0)  / trainHistory.length) + '%' : '–';
         const totalKills = trainHistory.reduce((s,r) => s + r.kills, 0);
-        const bestWaveH  = trainHistory.length ? Math.max(...trainHistory.map(r => r.wave)) : 0;
 
         // Trend: is performance improving?
         let trend = '';
@@ -877,9 +910,9 @@ ${ai.log.slice(0,6).map(l=>`<div style="color:#344;font-size:9px;line-height:1.5
             const early = trainHistory.slice(0, half).reduce((s,r) => s + r.wave, 0) / half;
             const late  = trainHistory.slice(-half).reduce((s,r) => s + r.wave, 0) / half;
             const delta = late - early;
-            if      (delta >  1.5) trend = '<span style="color:#00ff88">▲ IMPROVING</span>';
-            else if (delta < -1.5) trend = '<span style="color:#ff3040">▼ DECLINING</span>';
-            else                   trend = '<span style="color:#ff8800">◆ STABLE</span>';
+            if      (delta >  1.5) trend = '<span style="color:#00ff66">▲ IMPROVING</span>';
+            else if (delta < -1.5) trend = '<span style="color:#ff007f">▼ DECLINING</span>';
+            else                   trend = '<span style="color:#ffaa00">◆ STABLE</span>';
         }
 
         // Sparkline: mini SVG bar chart of wave reached per run
@@ -887,26 +920,24 @@ ${ai.log.slice(0,6).map(l=>`<div style="color:#344;font-size:9px;line-height:1.5
         if (trainHistory.length > 1) {
             const maxW  = Math.max(...trainHistory.map(r => r.wave), 1);
             const bars  = trainHistory.slice(-20); // last 20 runs
-            const bw    = 204 / bars.length;
+            const bw    = 240 / bars.length;
             const rects = bars.map((r, i) => {
-                const h   = Math.max(2, Math.round((r.wave / maxW) * 36));
+                const h   = Math.max(3, Math.round((r.wave / maxW) * 38));
                 const x   = i * bw;
-                const y   = 38 - h;
-                const col = r.wave >= mem.bestWave ? '#00ffcc' : r.wave >= avgWave ? '#0088ff' : '#334455';
-                return `<rect x="${x.toFixed(1)}" y="${y}" width="${(bw - 1).toFixed(1)}" height="${h}" fill="${col}" rx="1"/>`;
+                const y   = 40 - h;
+                const col = r.wave >= mem.bestWave ? '#00ff66' : r.wave >= avgWave ? '#00f0ff' : '#4a5568';
+                return `<rect x="${x.toFixed(1)}" y="${y}" width="${Math.max(1, (bw - 2)).toFixed(1)}" height="${h}" fill="${col}" rx="2"/>`;
             }).join('');
             sparkline = `
-<div style="border-top:1px solid rgba(0,255,204,0.1);padding-top:6px;margin-top:4px">
-  <div style="color:#334;font-size:9px;letter-spacing:1px;margin-bottom:3px">WAVE HISTORY (last ${bars.length} runs)</div>
-  <svg width="204" height="40" style="display:block">
-    <rect width="204" height="40" fill="#010810" rx="2"/>
-    ${rects}
-    <line x1="0" y1="39" x2="204" y2="39" stroke="#0a1a2a" stroke-width="1"/>
-  </svg>
-  <div style="display:flex;justify-content:space-between;font-size:8px;color:#223;margin-top:2px">
-    <span>run ${Math.max(1, mem.totalRuns - bars.length + 1)}</span>
-    <span>run ${mem.totalRuns}</span>
+<div class="train-chart-box">
+  <div class="train-chart-header">
+    <span>WAVE PERFORMANCE</span>
+    <span>LAST ${bars.length} RUNS</span>
   </div>
+  <svg width="240" height="42" style="display:block;border-radius:6px;background:rgba(0,0,0,0.4)">
+    ${rects}
+    <line x1="0" y1="41" x2="240" y2="41" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  </svg>
 </div>`;
         }
 
@@ -914,48 +945,52 @@ ${ai.log.slice(0,6).map(l=>`<div style="color:#344;font-size:9px;line-height:1.5
         const threats = mem.threatDeaths;
         const topThreat = Object.entries(threats).sort((a,b) => b[1]-a[1])[0];
         const threatStr = topThreat && topThreat[1] > 0
-            ? `<span style="color:#f46">${topThreat[0].toUpperCase()}</span> <span style="color:#334">(${topThreat[1].toFixed(1)} deaths)</span>`
-            : '<span style="color:#334">–</span>';
+            ? `<span style="color:#ff007f;font-weight:bold">${topThreat[0].toUpperCase()}</span> <span style="color:#718096">(${topThreat[1].toFixed(1)} deaths)</span>`
+            : '<span style="color:#718096">NONE LOGGED</span>';
 
         const phaseColors = {
-            HUNT:'#0ff', KITE:'#ff0', SEEK_DROP:'#f46', EVADE_BOMBER:'#f80', IDLE:'#556', FLANK:'#a0f'
+            HUNT:'#00f0ff', KITE:'#ffaa00', SEEK_DROP:'#ff007f', EVADE_BOMBER:'#ff4400', IDLE:'#8892b0', FLANK:'#a855f7'
         };
-        const pC = phaseColors[ai.phase] || '#0fc';
+        const pC = phaseColors[ai.phase] || '#00f0ff';
 
         el.innerHTML = `
-<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(0,255,204,0.2);padding-bottom:5px;margin-bottom:8px">
-  <span style="color:#0fc;font-size:11px;letter-spacing:2px;font-weight:bold">◈ AUTO-TRAIN</span>
-  <span style="font-size:9px;padding:2px 7px;border-radius:3px;background:${training?'rgba(0,255,204,0.12)':'rgba(255,136,0,0.12)'};color:${training?'#0fc':'#f80'};letter-spacing:1px;border:1px solid ${training?'#0fc44':'#f8044'}">${training?'RUNNING':'STOPPED'}</span>
+<div class="nexus-hud-header">
+  <div class="nexus-title-col">
+    <span class="nexus-brand">◈ AUTONOMOUS LAB</span>
+    <span class="nexus-sub">CONTINUOUS HEURISTIC CYCLE</span>
+  </div>
+  <span class="nexus-phase-pill" style="border-color:${training ? '#00ff66' : '#ffaa00'};color:${training ? '#00ff66' : '#ffaa00'};background:${training ? 'rgba(0,255,102,0.15)' : 'rgba(255,170,0,0.15)'}">
+    ${training ? '● LIVE RUN' : '■ STANDBY'}
+  </span>
 </div>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;margin-bottom:8px;font-size:9px">
-  <div><span style="color:#334;letter-spacing:1px">SESSION</span><br><span style="color:#aee">${elapsed}</span></div>
-  <div><span style="color:#334;letter-spacing:1px">RUNS</span><br><span style="color:#aee">${trainRunCount}</span></div>
-  <div><span style="color:#334;letter-spacing:1px">BEST WAVE</span><br><span style="color:#0fc">${mem.bestWave}</span></div>
-  <div><span style="color:#334;letter-spacing:1px">AVG WAVE</span><br><span style="color:#0ff">${avgWave}</span></div>
-  <div><span style="color:#334;letter-spacing:1px">AVG ACC</span><br><span style="color:#f80">${avgAcc}</span></div>
-  <div><span style="color:#334;letter-spacing:1px">KILLS</span><br><span style="color:#f46">${totalKills}</span></div>
+<div class="train-stats-grid">
+  <div class="train-stat-card"><span class="train-stat-label">SESSION</span><span class="train-stat-val">${elapsed}</span></div>
+  <div class="train-stat-card"><span class="train-stat-label">RUNS</span><span class="train-stat-val">${trainRunCount}</span></div>
+  <div class="train-stat-card"><span class="train-stat-label">RECORD</span><span class="train-stat-val" style="color:#00ff66">W${mem.bestWave}</span></div>
+  <div class="train-stat-card"><span class="train-stat-label">AVG WAVE</span><span class="train-stat-val" style="color:#00f0ff">${avgWave}</span></div>
+  <div class="train-stat-card"><span class="train-stat-label">ACCURACY</span><span class="train-stat-val" style="color:#ffaa00">${avgAcc}</span></div>
+  <div class="train-stat-card"><span class="train-stat-label">ELIMINATIONS</span><span class="train-stat-val" style="color:#ff007f">${totalKills}</span></div>
 </div>
 
-<div style="font-size:9px;margin-bottom:6px">
-  <span style="color:#334;letter-spacing:1px">TOP THREAT </span>${threatStr}
+<div class="train-info-row">
+  <span class="train-info-lbl">PRIMARY THREAT:</span>
+  <span>${threatStr}</span>
 </div>
 
-<div style="font-size:9px;margin-bottom:6px">
-  <span style="color:#334;letter-spacing:1px">TREND </span>${trend || '<span style="color:#334">– need 6+ runs</span>'}
+<div class="train-info-row">
+  <span class="train-info-lbl">TRAJECTORY:</span>
+  <span>${trend || '<span style="color:#718096">GATHERING SAMPLES</span>'}</span>
 </div>
 
-<div style="font-size:9px;margin-bottom:4px">
-  <span style="color:#334;letter-spacing:1px">PHASE </span>
-  <span style="color:${pC}">${ai.phase}</span>
-  <span style="color:#223;margin-left:8px">W${typeof wave!=='undefined'?wave:'–'} HP:${Math.ceil(hp||0)}</span>
+<div class="train-info-row">
+  <span class="train-info-lbl">LIVE STATUS:</span>
+  <span style="color:${pC};font-weight:bold">${ai.phase} // WAVE ${typeof wave!=='undefined'?wave:'–'}</span>
 </div>
 
 ${sparkline}
 
-<div style="border-top:1px solid rgba(0,255,204,0.08);padding-top:5px;margin-top:6px">
-${ai.log.slice(0,4).map(l=>`<div style="color:#223;font-size:8px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l}</div>`).join('')}
-</div>`;
+<button id="nexus-reset-btn" onclick="NEXUS.resetMemory(); if (typeof Sound !== 'undefined') Sound.uiClick();">↺ RECALIBRATE MEMORY ARCHIVE</button>`;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -966,70 +1001,370 @@ ${ai.log.slice(0,4).map(l=>`<div style="color:#223;font-size:8px;line-height:1.5
 
         const s = document.createElement('style');
         s.textContent = `
-        /* ── Combat co-pilot HUD (manual mode) ── */
+        /* ── NEXUS HUD Cyber Redesign ── */
         #nexus-hud {
-            position:fixed;top:14px;right:170px;width:232px;
-            background:rgba(0,2,10,0.88);
-            border:1px solid rgba(0,255,204,0.22);border-radius:6px;
-            padding:10px 12px;font-family:'Courier New',monospace;
-            color:#aee;z-index:9999;pointer-events:none;
-            backdrop-filter:blur(6px);
-            box-shadow:0 0 24px rgba(0,255,204,0.08),inset 0 0 30px rgba(0,255,204,0.03);
-            display:none;
+            position: fixed;
+            top: 20px;
+            right: 200px;
+            width: 270px;
+            background: rgba(10, 13, 22, 0.94);
+            border: 1px solid rgba(0, 240, 255, 0.35);
+            border-radius: 16px;
+            padding: 14px 16px;
+            font-family: 'Space Grotesk', sans-serif;
+            color: #f8faff;
+            z-index: 9999;
+            pointer-events: none;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 240, 255, 0.12);
+            display: none;
+            overflow: hidden;
         }
-        /* ── Training stats HUD ── */
+        #nexus-hud::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, #00f0ff, transparent);
+            animation: radarSweep 3s infinite linear;
+        }
+        @keyframes radarSweep {
+            0% { transform: translateY(-10px); opacity: 0; }
+            50% { opacity: 0.8; }
+            100% { transform: translateY(300px); opacity: 0; }
+        }
+
         #nexus-train-hud {
-            position:fixed;top:14px;right:14px;width:228px;
-            background:rgba(0,2,10,0.92);
-            border:1px solid rgba(0,255,204,0.28);border-radius:6px;
-            padding:10px 12px;font-family:'Courier New',monospace;
-            color:#aee;z-index:9999;pointer-events:none;
-            backdrop-filter:blur(8px);
-            box-shadow:0 0 28px rgba(0,255,204,0.10),inset 0 0 30px rgba(0,255,204,0.04);
-            display:none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 276px;
+            background: rgba(10, 13, 22, 0.95);
+            border: 1px solid rgba(0, 255, 102, 0.4);
+            border-radius: 18px;
+            padding: 16px 18px;
+            font-family: 'Space Grotesk', sans-serif;
+            color: #f8faff;
+            z-index: 9999;
+            pointer-events: auto;
+            backdrop-filter: blur(14px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(0, 255, 102, 0.15);
+            display: none;
         }
-        /* ── Manual AI button (bottom-right, shown when NOT training) ── */
-        #nexus-btn {
-            position:fixed;bottom:90px;right:14px;
-            background:rgba(0,255,204,0.06);
-            border:1px solid rgba(0,255,204,0.35);
-            color:#0fc;font-family:'Courier New',monospace;
-            font-size:10px;letter-spacing:2px;padding:7px 14px;
-            cursor:pointer;border-radius:4px;z-index:9999;
-            transition:background 0.2s,box-shadow 0.2s;
+
+        .nexus-hud-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding-bottom: 8px;
+            margin-bottom: 10px;
         }
-        #nexus-btn:hover { background:rgba(0,255,204,0.15);box-shadow:0 0 10px rgba(0,255,204,0.2); }
-        #nexus-btn.on    { background:rgba(0,255,204,0.18);border-color:#0fc;box-shadow:0 0 14px rgba(0,255,204,0.25); }
-        /* ── AUTO TRAIN button (bottom-right, always visible) ── */
-        #nexus-train-btn {
-            position:fixed;bottom:50px;right:14px;
-            background:rgba(0,255,204,0.08);
-            border:1px solid rgba(0,255,204,0.45);
-            color:#0fc;font-family:'Courier New',monospace;
-            font-size:10px;letter-spacing:2px;padding:7px 14px;
-            cursor:pointer;border-radius:4px;z-index:9999;
-            transition:background 0.2s,box-shadow 0.2s;
+        .nexus-title-col {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
         }
-        #nexus-train-btn:hover { background:rgba(0,255,204,0.18);box-shadow:0 0 12px rgba(0,255,204,0.25); }
-        #nexus-train-btn.on    {
-            background:rgba(0,255,204,0.22);border-color:#0fc;
-            box-shadow:0 0 18px rgba(0,255,204,0.35);
-            animation: nexusPulse 1.8s ease-in-out infinite;
+        .nexus-brand {
+            font-family: 'Syne', sans-serif;
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            color: #00f0ff;
         }
-        @keyframes nexusPulse {
-            0%,100% { box-shadow:0 0 18px rgba(0,255,204,0.35); }
-            50%      { box-shadow:0 0 28px rgba(0,255,204,0.65); }
+        .nexus-sub {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 8px;
+            letter-spacing: 1px;
+            color: rgba(255, 255, 255, 0.4);
         }
-        /* ── Reset memory button inside training HUD ── */
+        .nexus-phase-pill {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid;
+            letter-spacing: 1px;
+        }
+
+        .nexus-target-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 6px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .nexus-lbl {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            letter-spacing: 1px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        .nexus-val-target {
+            font-family: 'Syne', sans-serif;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 1px;
+        }
+
+        .nexus-bars-col {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+        .nexus-bar-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .nexus-mini-lbl {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 8px;
+            color: rgba(255, 255, 255, 0.45);
+        }
+        .nexus-mini-val {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 700;
+        }
+        .nexus-bar-track {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 999px;
+            overflow: hidden;
+        }
+        .nexus-bar-fill {
+            height: 100%;
+            border-radius: 999px;
+            transition: width 0.15s;
+        }
+
+        .nexus-grid-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+        .nexus-metric-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 6px 4px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .nexus-metric-lbl {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 8px;
+            color: rgba(255, 255, 255, 0.4);
+            letter-spacing: 0.5px;
+        }
+        .nexus-metric-num {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        .nexus-log-container {
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            padding-top: 8px;
+        }
+        .nexus-log-title {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 8px;
+            letter-spacing: 1.5px;
+            color: rgba(255, 255, 255, 0.35);
+            margin-bottom: 4px;
+        }
+        .nexus-log-line {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            color: rgba(248, 250, 255, 0.65);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.4;
+        }
+
+        /* ── Training HUD Details ── */
+        .train-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+        .train-stat-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 8px;
+        }
+        .train-stat-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 8px;
+            letter-spacing: 0.5px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+        .train-stat-val {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            font-weight: 800;
+            color: #ffffff;
+        }
+        .train-info-row {
+            display: flex;
+            justify-content: space-between;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            margin-bottom: 6px;
+            padding: 4px 8px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 6px;
+        }
+        .train-info-lbl {
+            color: rgba(255, 255, 255, 0.45);
+        }
+        .train-chart-box {
+            margin: 10px 0 12px 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            padding-top: 8px;
+        }
+        .train-chart-header {
+            display: flex;
+            justify-content: space-between;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 8px;
+            letter-spacing: 1px;
+            color: rgba(255, 255, 255, 0.4);
+            margin-bottom: 6px;
+        }
         #nexus-reset-btn {
-            display:block;width:100%;margin-top:8px;
-            background:rgba(255,48,64,0.08);
-            border:1px solid rgba(255,48,64,0.3);
-            color:#f46;font-family:'Courier New',monospace;
-            font-size:9px;letter-spacing:1px;padding:4px 0;
-            cursor:pointer;border-radius:3px;pointer-events:all;
+            display: block;
+            width: 100%;
+            padding: 8px 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            background: rgba(255, 0, 127, 0.1);
+            border: 1px solid rgba(255, 0, 127, 0.35);
+            color: #ff007f;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
         }
-        #nexus-reset-btn:hover { background:rgba(255,48,64,0.18); }
+        #nexus-reset-btn:hover {
+            background: rgba(255, 0, 127, 0.25);
+            box-shadow: 0 0 16px rgba(255, 0, 127, 0.4);
+        }
+
+        /* ── NEXUS Buttons (Bottom-Right) ── */
+        #nexus-btn {
+            position: fixed;
+            bottom: 94px;
+            right: 20px;
+            background: rgba(14, 16, 26, 0.88);
+            border: 1px solid rgba(0, 240, 255, 0.4);
+            color: #00f0ff;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 10px;
+            z-index: 9999;
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        }
+        #nexus-btn:hover {
+            border-color: #00f0ff;
+            background: rgba(0, 240, 255, 0.15);
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        #nexus-btn.on {
+            background: rgba(0, 240, 255, 0.2);
+            border-color: #00f0ff;
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.4);
+        }
+        .nexus-pulse-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #00ff66;
+            box-shadow: 0 0 8px #00ff66;
+            animation: blinkDot 0.8s infinite alternate;
+        }
+        .nexus-pulse-dot.off {
+            background: #718096;
+            box-shadow: none;
+            animation: none;
+        }
+
+        /* AUTO TRAIN button */
+        #nexus-train-btn {
+            position: fixed;
+            bottom: 46px;
+            right: 20px;
+            background: linear-gradient(135deg, rgba(14, 16, 26, 0.95), rgba(20, 25, 38, 0.95));
+            border: 1px solid rgba(0, 255, 102, 0.45);
+            color: #00ff66;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            padding: 10px 18px;
+            cursor: pointer;
+            border-radius: 12px;
+            z-index: 9999;
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+        #nexus-train-btn:hover {
+            border-color: #00ff66;
+            background: rgba(0, 255, 102, 0.15);
+            box-shadow: 0 0 24px rgba(0, 255, 102, 0.35);
+            transform: translateY(-2px);
+        }
+        #nexus-train-btn.on {
+            border-color: #ff007f;
+            color: #ff007f;
+            background: rgba(255, 0, 127, 0.15);
+            box-shadow: 0 0 30px rgba(255, 0, 127, 0.45);
+            animation: trainLivePulse 1.4s ease-in-out infinite alternate;
+        }
+        @keyframes trainLivePulse {
+            from { box-shadow: 0 0 16px rgba(255, 0, 127, 0.3); }
+            to   { box-shadow: 0 0 32px rgba(255, 0, 127, 0.7); }
+        }
+        .train-icon {
+            font-size: 11px;
+        }
+        .train-live-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #ff007f;
+            box-shadow: 0 0 8px #ff007f;
+            animation: blinkDot 0.6s infinite alternate;
+        }
         `;
         document.head.appendChild(s);
 
@@ -1046,7 +1381,7 @@ ${ai.log.slice(0,4).map(l=>`<div style="color:#223;font-size:8px;line-height:1.5
         // Manual AI toggle button
         const btn = document.createElement('button');
         btn.id = 'nexus-btn';
-        btn.textContent = '▶ NEXUS AI';
+        btn.innerHTML = '<span class="nexus-pulse-dot off"></span> ▶ NEXUS AI';
         btn.addEventListener('click', () => {
             if (training) return; // ignore if training
             active ? disable() : enable();
@@ -1056,7 +1391,7 @@ ${ai.log.slice(0,4).map(l=>`<div style="color:#223;font-size:8px;line-height:1.5
         // AUTO TRAIN button — visible based on user setting
         const trainBtn = document.createElement('button');
         trainBtn.id = 'nexus-train-btn';
-        trainBtn.textContent = '▶ AUTO TRAIN';
+        trainBtn.innerHTML = '<span class="train-icon">▶</span> AUTO TRAIN';
         trainBtn.addEventListener('click', () => {
             training ? stopTraining() : startTraining();
         });
