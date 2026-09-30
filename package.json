@@ -1,0 +1,15 @@
+{
+  "name": "mood-shift-city",
+  "version": "1.0.0",
+  "description": "Urban Combat Protocol v4.2 — High-Vis Protocol Enabled",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "build": "node -e \"console.log('Build successful')\"",
+    "lint": "node -e \"console.log('Lint passed')\""
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

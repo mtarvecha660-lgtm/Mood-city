@@ -1,0 +1,8 @@
+{
+  "name": "Mood Shift City: Ultra Vis",
+  "description": "Urban Combat Protocol v4.2 — High-Vis Protocol Enabled. 3D browser-based first-person shooter built with Three.js.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ],
+  "permissions": []
+}
