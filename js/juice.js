@@ -29,13 +29,22 @@ const Juice = (() => {
         return null;
     }
     let skinId = localStorage.getItem('msc_skin') || 'sunbeam';
+    // The skin you actually play with: the selected one if unlocked, otherwise
+    // the best skin you have unlocked (never silently back to SUNBEAM).
     function currentSkin() {
         const L = levelFor(playerXP);
         const s = SKINS.find(x => x.id === skinId);
-        return (s && s.lvl <= L) ? s : SKINS[0];
+        if (s && s.lvl <= L) return s;
+        return SKINS.filter(x => x.lvl <= L).pop() || SKINS[0];
     }
+    // Arrows step through every skin by the selected one's own position (the old
+    // code stepped from currentSkin(), which jumps back to SUNBEAM on a locked
+    // skin, so the arrows got stuck bouncing between the same 2-3 skins).
+    // Locked skins are shown as a preview with their unlock level; play keeps
+    // your best unlocked skin until you reach that level.
     function cycleSkin(dir) {
-        let i = SKINS.findIndex(s => s.id === currentSkin().id);
+        let i = SKINS.findIndex(s => s.id === skinId);
+        if (i < 0) i = 0;
         i = (i + dir + SKINS.length) % SKINS.length;
         skinId = SKINS[i].id;
         localStorage.setItem('msc_skin', skinId);
@@ -480,7 +489,7 @@ const Juice = (() => {
         if (nx) nx.textContent = nu ? `${(xpForLevel(nu.lvl) - playerXP).toLocaleString()} XP → ${nu.what}` : 'everything unlocked';
         const sk = $('skin-name'), sw = $('skin-swatch');
         const want = SKINS.find(s => s.id === skinId) || SKINS[0];
-        if (sk) sk.innerHTML = want.lvl <= L ? want.name : `${want.name} <small>🔒 LVL ${want.lvl}</small>`;
+        if (sk) sk.innerHTML = want.lvl <= L ? want.name : `${want.name} <small>🔒 LVL ${want.lvl} · using ${currentSkin().name}</small>`;
         if (sw) { sw.style.background = '#' + want.color.toString(16).padStart(6, '0'); sw.classList.toggle('locked', want.lvl > L); }
         const hs = $('menu-hs'); if (hs) hs.textContent = highScore.toLocaleString();
     }

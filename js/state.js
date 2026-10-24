@@ -55,7 +55,7 @@ let buildingLights = [];
 let highScore = parseInt(localStorage.getItem('msc_highscore') || '0');
 
 // ── Character build ──
-let selectedChar  = 'striker';
+let selectedChar  = (() => { try { const v = localStorage.getItem('msc_operative'); return ['striker','enforcer','phantom','medic'].includes(v) ? v : 'striker'; } catch (e) { return 'striker'; } })();
 let playerSpeed   = 0.2;
 let playerMaxHp   = 100;
 let shootCooldown = 150;

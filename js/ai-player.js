@@ -59,6 +59,7 @@ const NEXUS = (() => {
         if (name !== 'sniper') s += Math.max(0, 28 - d) * 5;
         if (hpF < 0.35) s *= 1.5;
         s += (mem.threatDeaths[name] || 0) * 18;
+        s += playerPickBias(name);
         s += Math.max(0, 80 - e.hp) * 0.4;
 
         // Heavily penalize enemies we can't see — prefer visible targets
@@ -531,6 +532,8 @@ const NEXUS = (() => {
                         gamePaused = false;
                         const pm = document.getElementById('pause-menu');
                         if (pm) pm.style.display = 'none';
+                        if (typeof Juice !== 'undefined') Juice.onPause(false);
+                        if (typeof animate === 'function') animate();   // the loop stops while paused; restart it
                     }
                 }, 8);
             }
@@ -997,7 +1000,7 @@ ${sparkline}
     //  INIT UI
     // ─────────────────────────────────────────────────────────────
     function injectUI() {
-        if (document.getElementById('nexus-train-btn')) return;
+        if (document.getElementById('nexus-hud')) return;
 
         const s = document.createElement('style');
         s.textContent = `
@@ -1378,32 +1381,15 @@ ${sparkline}
         thud.id = 'nexus-train-hud';
         document.body.appendChild(thud);
 
-        // Manual AI toggle button
-        const btn = document.createElement('button');
-        btn.id = 'nexus-btn';
-        btn.innerHTML = '<span class="nexus-pulse-dot off"></span> ▶ NEXUS AI';
-        btn.addEventListener('click', () => {
-            if (training) return; // ignore if training
-            active ? disable() : enable();
-        });
-        document.body.appendChild(btn);
-
-        // AUTO TRAIN button — visible based on user setting
-        const trainBtn = document.createElement('button');
-        trainBtn.id = 'nexus-train-btn';
-        trainBtn.innerHTML = '<span class="train-icon">▶</span> AUTO TRAIN';
-        trainBtn.addEventListener('click', () => {
-            training ? stopTraining() : startTraining();
-        });
-        document.body.appendChild(trainBtn);
-
+        // The two old floating buttons (NEXUS AI / AUTO TRAIN) are replaced by one
+        // AI button + menu (AIMenu, bottom of this file).
         updateTrainButtonVisibility();
     }
 
     function updateTrainButtonVisibility() {
-        const btn = document.getElementById('nexus-train-btn');
+        const btn = document.getElementById('ai-btn');
         if (!btn) return;
-        btn.style.display = settings.aiTrainButtonVisible === false ? 'none' : 'block';
+        btn.classList.toggle('hidden-by-setting', settings.aiTrainButtonVisible === false);
     }
 
     window.setNexusTrainButtonVisible = function(visible) {
@@ -1436,11 +1422,76 @@ ${sparkline}
                 training ? stopTraining() : startTraining();
             }
         });
-        console.log('%c[NEXUS AI v3] Ready — click ▶ AUTO TRAIN or press Alt+T to begin autonomous training', 'color:#00ffcc;font-weight:bold');
+        
     };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);
     else ready();
+
+
+    // ─────────────────────────────────────────────────────────────
+    //  LEARN FROM MY PLAY (opt-in): while YOU play, the AI records what hurts
+    //  you (threat weights), where you get hit (danger zones) and which enemy
+    //  types you go for (target priorities). The co-pilot and practice mode use
+    //  the same memory, so it starts playing more like you.
+    // ─────────────────────────────────────────────────────────────
+    mem.playerPicks  = mem.playerPicks  || {};
+    mem.learnedHits  = mem.learnedHits  || 0;
+    mem.learnedKills = mem.learnedKills || 0;
+    mem.learnedRuns  = mem.learnedRuns  || 0;
+    let learnFromMe = (() => { try { return localStorage.getItem('nexus_learn_mine') === '1'; } catch { return false; } })();
+    let humanLastHp = null, humanWasRunning = false;
+
+    function playerPickBias(name) {
+        const tot = mem.learnedKills || 0;
+        if (tot < 5) return 0;
+        return ((mem.playerPicks[name] || 0) / tot) * 160;
+    }
+    function humanPlaying() {
+        return typeof gameRunning !== 'undefined' && gameRunning && !gamePaused && !active && !training && !tutorialMode;
+    }
+    function nearestEnemyName() {
+        if (!player || !enemies || !enemies.length) return null;
+        let best = null, bd = Infinity;
+        for (const e of enemies) { const d = player.position.distanceTo(e.mesh.position); if (d < bd) { bd = d; best = e; } }
+        return best ? (best.name || '').toLowerCase() : null;
+    }
+    setInterval(() => {
+        const running = typeof gameRunning !== 'undefined' && gameRunning && !active && !training && !tutorialMode;
+        if (learnFromMe && humanWasRunning && !running && typeof hp !== 'undefined' && hp <= 0) { mem.learnedRuns++; saveMem(); }
+        humanWasRunning = running;
+        if (!learnFromMe || !humanPlaying()) { humanLastHp = null; return; }
+        if (humanLastHp !== null && hp < humanLastHp - 1) {
+            markDanger(player.position);
+            const n = nearestEnemyName();
+            if (n) mem.threatDeaths[n] = (mem.threatDeaths[n] || 0) + 0.15;
+            mem.learnedHits++;
+            saveMem();
+        }
+        humanLastHp = hp;
+    }, 250);
+    function hookKills() {
+        if (typeof Juice === 'undefined' || Juice._nexusHooked) return;
+        const orig = Juice.onKill;
+        Juice.onKill = function(e) {
+            try {
+                if (learnFromMe && !active && !training && !tutorialMode && e) {
+                    const n = (e.name || '').toLowerCase();
+                    mem.playerPicks[n] = (mem.playerPicks[n] || 0) + 1;
+                    mem.learnedKills++;
+                    if (mem.learnedKills % 5 === 0) saveMem();
+                }
+            } catch (err) {}
+            return orig.apply(this, arguments);
+        };
+        Juice._nexusHooked = true;
+    }
+    hookKills();
+    function setLearnFromMe(v) {
+        learnFromMe = !!v;
+        try { localStorage.setItem('nexus_learn_mine', learnFromMe ? '1' : '0'); } catch {}
+        saveMem();
+    }
 
     return {
         enable, disable,
@@ -1449,10 +1500,15 @@ ${sparkline}
         get isTraining(){ return training; },
         get mem()      { return mem; },
         get history()  { return trainHistory; },
+        get learnFromMe() { return learnFromMe; },
+        setLearnFromMe,
+        get phase()    { return ai.phase; },
+        get runs()     { return trainRunCount; },
         resetMemory() {
             mem = {
                 threatDeaths:{scout:0,sniper:0,bomber:0,tank:0,boss:0,runner:0},
-                totalRuns:0, bestWave:0, dangerZones:[]
+                totalRuns:0, bestWave:0, dangerZones:[],
+                playerPicks:{}, learnedHits:0, learnedKills:0, learnedRuns:0
             };
             saveMem();
             trainHistory = [];
@@ -1469,3 +1525,162 @@ ${sparkline}
 //   ▶ NEXUS AI button                   → manual co-pilot (single run)
 //   Alt+A                               → same keyboard shortcut
 // ─────────────────────────────────────────────────────────────────
+
+
+// ─────────────────────────────────────────────────────────────────
+// AI MENU — one button, one compact panel, three plain options.
+//   1. AI plays for me      → NEXUS co-pilot takes over your run (was "NEXUS AI")
+//   2. Learn from my play   → your runs teach the AI (new, opt-in)
+//   3. AI practice mode     → AI plays endless runs alone to learn (was "AUTO TRAIN")
+// While the AI is driving, a small chip shows what it is doing; tap it to stop.
+// ─────────────────────────────────────────────────────────────────
+const AIMenu = (() => {
+    const $ = id => document.getElementById(id);
+    let pausedByMenu = false;
+    const click = () => { if (typeof Sound !== 'undefined' && Sound.uiClick) Sound.uiClick(); };
+
+    function topThreat(mem) {
+        let best = null, v = 0.5;
+        for (const k in mem.threatDeaths) if (mem.threatDeaths[k] > v) { v = mem.threatDeaths[k]; best = k; }
+        return best;
+    }
+    function favPick(mem) {
+        let best = null, v = 0;
+        for (const k in (mem.playerPicks || {})) if (mem.playerPicks[k] > v) { v = mem.playerPicks[k]; best = k; }
+        return best;
+    }
+
+    function build() {
+        if ($('ai-btn')) return;
+        const btn = document.createElement('button');
+        btn.id = 'ai-btn';
+        btn.setAttribute('aria-label', 'AI options');
+        btn.innerHTML = '<span class="ai-ico">🤖</span><span class="ai-lbl">AI</span>';
+        btn.addEventListener('click', e => { e.stopPropagation(); click(); open(); });
+        document.body.appendChild(btn);
+
+        const chip = document.createElement('button');
+        chip.id = 'ai-chip';
+        chip.addEventListener('click', e => { e.stopPropagation(); click(); stopAll(); });
+        document.body.appendChild(chip);
+
+        const panel = document.createElement('div');
+        panel.id = 'ai-panel';
+        panel.innerHTML = `
+          <div class="ai-card" role="dialog" aria-label="AI options">
+            <div class="ai-head"><span>🤖 AI</span><button class="ai-x" id="ai-close" aria-label="Close">✕</button></div>
+            <div class="ai-row">
+              <div class="ai-txt"><b>AI plays for me</b><span>Takes over your run: aims, moves and shoots for you. Turn off to take back control.</span></div>
+              <button class="ai-tog" id="ai-opt-copilot"></button>
+            </div>
+            <div class="ai-row">
+              <div class="ai-txt"><b>Learn from my play</b><span>While you play, it watches what hurts you, where you get hit and which enemies you go for first, and copies that.</span></div>
+              <button class="ai-tog" id="ai-opt-learn"></button>
+            </div>
+            <div class="ai-row">
+              <div class="ai-txt"><b>AI practice mode</b><span>The AI plays non-stop runs on its own to learn which enemies kill it. Watch it, or stop any time.</span></div>
+              <button class="ai-tog" id="ai-opt-practice"></button>
+            </div>
+            <div class="ai-foot"><span id="ai-mem"></span><button class="ai-reset" id="ai-reset">RESET MEMORY</button></div>
+          </div>`;
+        panel.addEventListener('click', e => { if (e.target === panel) close(); });
+        document.body.appendChild(panel);
+
+        $('ai-close').addEventListener('click', e => { e.stopPropagation(); click(); close(); });
+        $('ai-opt-copilot').addEventListener('click', e => {
+            e.stopPropagation(); click();
+            if (NEXUS.isTraining) NEXUS.stopTraining();
+            if (NEXUS.on) NEXUS.disable(); else NEXUS.enable();
+            render();
+            if (NEXUS.on) {
+                close(true);
+                // turning the AI on from the pause menu jumps straight back into the run
+                if (typeof gameRunning !== 'undefined' && gameRunning && gamePaused && typeof resumeGame === 'function') resumeGame();
+            }
+        });
+        $('ai-opt-learn').addEventListener('click', e => {
+            e.stopPropagation(); click();
+            NEXUS.setLearnFromMe(!NEXUS.learnFromMe);
+            render();
+        });
+        $('ai-opt-practice').addEventListener('click', e => {
+            e.stopPropagation(); click();
+            if (NEXUS.isTraining) { NEXUS.stopTraining(); render(); return; }
+            if (NEXUS.on) NEXUS.disable();
+            pausedByMenu = false;
+            if (typeof gamePaused !== 'undefined' && gamePaused && gameRunning) { gamePaused = false; const pm = $('pause-menu'); if (pm) pm.style.display = 'none'; }
+            close(true);
+            NEXUS.startTraining();
+            render();
+        });
+        $('ai-reset').addEventListener('click', e => {
+            e.stopPropagation(); click();
+            if (confirm('Reset everything the AI has learned?')) { NEXUS.resetMemory(); render(); }
+        });
+        setInterval(renderChip, 500);
+        const menuEl = $('menu');
+        if (menuEl && window.MutationObserver) new MutationObserver(renderChip).observe(menuEl, { attributes: true, attributeFilter: ['style'] });
+        render();
+    }
+
+    function render() {
+        const set = (id, on, onTxt, offTxt) => { const b = $(id); if (!b) return; b.classList.toggle('on', !!on); b.textContent = on ? onTxt : offTxt; };
+        set('ai-opt-copilot', NEXUS.on && !NEXUS.isTraining, 'ON', 'OFF');
+        set('ai-opt-learn', NEXUS.learnFromMe, 'ON', 'OFF');
+        set('ai-opt-practice', NEXUS.isTraining, 'STOP', 'START');
+        const m = NEXUS.mem, el = $('ai-mem');
+        if (el && m) {
+            const parts = [];
+            parts.push(`${m.learnedRuns || 0} of your runs, ${m.totalRuns || 0} practice runs`);
+            if (m.bestWave) parts.push(`AI best: wave ${m.bestWave}`);
+            const t = topThreat(m); if (t) parts.push(`fears: ${t}`);
+            const f = favPick(m); if (f && (m.learnedKills || 0) >= 5) parts.push(`you hunt: ${f}`);
+            el.textContent = 'Learned from ' + parts.join(' · ');
+        }
+        const btn = $('ai-btn'); if (btn) btn.classList.toggle('on', NEXUS.on || NEXUS.isTraining);
+        renderChip();
+    }
+
+    function renderChip() {
+        const btn = $('ai-btn');
+        if (btn) { const menu = $('menu'); btn.style.display = (menu && menu.style.display !== 'none' && getComputedStyle(menu).display !== 'none') ? '' : 'none'; }
+        const chip = $('ai-chip'); if (!chip) return;
+        const running = typeof gameRunning !== 'undefined' && gameRunning;
+        if (NEXUS.isTraining) {
+            const h = NEXUS.history || [], last = h[h.length - 1];
+            chip.innerHTML = `<span class="dot"></span>AI PRACTICING · RUN ${NEXUS.runs + 1}${NEXUS.mem.bestWave ? ' · BEST W' + NEXUS.mem.bestWave : ''}${last ? ' · ' + last.acc + '% ACC' : ''} <b>■ STOP</b>`;
+            chip.style.display = 'flex';
+        } else if (NEXUS.on && running) {
+            chip.innerHTML = `<span class="dot"></span>AI PLAYING · ${String(NEXUS.phase || '').toUpperCase()} <b>■ STOP</b>`;
+            chip.style.display = 'flex';
+        } else chip.style.display = 'none';
+    }
+
+    function stopAll() {
+        if (NEXUS.isTraining) {
+            NEXUS.stopTraining();
+            if (typeof exitToMenu === 'function') exitToMenu();
+        } else if (NEXUS.on) NEXUS.disable();
+        render();
+    }
+
+    function open() {
+        if (typeof gameRunning !== 'undefined' && gameRunning && !gamePaused && !NEXUS.isTraining) {
+            gamePaused = true; pausedByMenu = true;
+            if (typeof Juice !== 'undefined') Juice.onPause(true);
+            if (document.pointerLockElement) document.exitPointerLock();
+        }
+        const pm = $('pause-menu'); if (pm && pm.style.display === 'flex') pm.classList.add('under-ai');
+        render();
+        $('ai-panel').classList.add('show');
+    }
+    function close(skipResume) {
+        $('ai-panel').classList.remove('show');
+        const pm = $('pause-menu'); if (pm) pm.classList.remove('under-ai');
+        if (pausedByMenu && !skipResume && typeof resumeGame === 'function') { pausedByMenu = false; resumeGame(); }
+        pausedByMenu = false;
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build); else build();
+    return { open, close, render };
+})();

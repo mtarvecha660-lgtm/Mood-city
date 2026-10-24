@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Mood Shift City: Ultra Vis</title>
     <meta name="description" content="Urban Combat Protocol v4.2 — High-Vis Protocol Enabled. 3D browser-based first-person shooter built with Three.js.">
     <meta property="og:title" content="Mood Shift City: Ultra Vis">
@@ -14,8 +14,14 @@
     <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
 
     <meta name="theme-color" content="#f6c6a4">
-    <link rel="stylesheet" href="css/style.css?v=11">
-    <link rel="stylesheet" href="css/golden.css?v=11">
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Mood City">
+    <link rel="apple-touch-icon" href="icons/icon-180.png">
+    <link rel="stylesheet" href="css/style.css?v=12">
+    <link rel="stylesheet" href="css/golden.css?v=12">
 </head>
 <body>
 
@@ -119,7 +125,7 @@
                 <div class="ctrl-tag"><span class="ctrl-key">R</span> <span class="ctrl-act">RELOAD</span></div>
                 <div class="ctrl-tag"><span class="ctrl-key">F</span> <span class="ctrl-act">ROCKET</span></div>
                 <div class="ctrl-tag"><span class="ctrl-key">M</span> <span class="ctrl-act">MUTE</span></div>
-                <div class="ctrl-tag"><span class="ctrl-key">ALT+T</span> <span class="ctrl-act">AI SIM</span></div>
+                <div class="ctrl-tag"><span class="ctrl-key">ALT+A / ALT+T</span> <span class="ctrl-act">AI PLAY / PRACTICE</span></div>
             </div>
         </div>
     </div>
@@ -160,7 +166,7 @@
             <div class="settings-section" id="settings-controls-section">
                 <div class="settings-section-label">// COMBAT INPUT & AI</div>
                 <div class="settings-row">
-                    <span class="settings-label">AI TRAIN BUTTON</span>
+                    <span class="settings-label">SHOW AI BUTTON</span>
                     <button class="settings-toggle"
                             id="ai-train-visibility-toggle"
                             onclick="toggleAITrainButtonSetting(); if (typeof Sound !== 'undefined') Sound.uiClick();">ON</button>
@@ -193,7 +199,7 @@
 
     <div id="codex-header">
         <div class="back-link" onclick="closeCodex(); if (typeof Sound !== 'undefined') Sound.uiClick();">&#8592; BACK</div>
-        <div id="codex-title-text">TACTICAL ARCHIVES</div>
+        <div id="codex-title-text">INTEL &amp; LOADOUT</div>
         <div id="codex-tabs">
             <button class="codex-tab" id="tab-btn-operatives" onclick="switchCodexTab('operatives'); if (typeof Sound !== 'undefined') Sound.uiClick();">OPERATIVES</button>
             <button class="codex-tab" id="tab-btn-threats" onclick="switchCodexTab('threats'); if (typeof Sound !== 'undefined') Sound.uiClick();">THREATS</button>
@@ -206,8 +212,8 @@
 
         <div id="codex-main">
             <div id="codex-preview-area">
-                <canvas id="preview-canvas" width="220" height="220"></canvas>
-                <div id="preview-label">3D SPECIMEN SCAN</div>
+                <canvas id="preview-canvas"></canvas>
+                <div id="preview-label"></div>
             </div>
             <div id="codex-info-area">
                 <div id="codex-info"></div>
@@ -224,6 +230,7 @@
         <div id="pause-title">STANDBY</div>
         <div class="pause-actions">
             <button class="pause-btn" onclick="resumeGame(); if (typeof Sound !== 'undefined') Sound.uiClick();">&#9658; RESUME</button>
+            <button class="pause-btn secondary" onclick="AIMenu.open(); if (typeof Sound !== 'undefined') Sound.uiClick();">🤖 AI OPTIONS</button>
             <button class="pause-btn secondary" id="pause-exit-btn" onclick="exitToMenu()">&#8592; ABORT TO MENU</button>
         </div>
     </div>
@@ -350,15 +357,15 @@
 
 <!-- Scripts -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="js/state.js?v=11"></script>
-<script src="js/audio.js?v=11"></script>
-<script src="js/mobile.js?v=11"></script>
-<script src="js/controls.js?v=11"></script>
-<script src="js/tutorial.js?v=11"></script>
-<script src="js/toon.js?v=11"></script>
-<script src="js/juice.js?v=11"></script>
-<script src="js/game.js?v=11"></script>
-<script src="js/ai-player.js?v=11"></script>
+<script src="js/state.js?v=12"></script>
+<script src="js/audio.js?v=12"></script>
+<script src="js/mobile.js?v=12"></script>
+<script src="js/controls.js?v=12"></script>
+<script src="js/tutorial.js?v=12"></script>
+<script src="js/toon.js?v=12"></script>
+<script src="js/juice.js?v=12"></script>
+<script src="js/game.js?v=12"></script>
+<script src="js/ai-player.js?v=12"></script>
 <script>
 // Menu backdrop: two layers of flat skyline silhouettes
 (function() {
