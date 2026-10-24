@@ -281,7 +281,7 @@ const Toon = (() => {
             const eyeR = headR * (kind === 'scout' ? 0.42 : 0.26);
             const eyeGeo = geo('eye' + eyeR.toFixed(3), () => new THREE.SphereGeometry(eyeR, 10, 8));
             const pupGeo = geo('pup' + eyeR.toFixed(3), () => new THREE.SphereGeometry(eyeR * 0.55, 8, 6));
-            const eyes = kind === 'scout' ? [0] : kind === 'boss' ? [-0.5, 0, 0.5] : [-0.42, 0.42];
+            const eyes = kind === 'sniper' ? [] : kind === 'scout' ? [0] : kind === 'boss' ? [-0.5, 0, 0.5] : [-0.42, 0.42];
             for (const ex of eyes) {
                 const eye = new THREE.Mesh(eyeGeo, cream);
                 eye.position.set(ex * headR, headY + headR * 0.12, headR * 0.82);
@@ -295,8 +295,15 @@ const Toon = (() => {
                 const visor = new THREE.Mesh(geo('visor' + headR.toFixed(3), () => new THREE.BoxGeometry(headR * 2.1, headR * 0.45, headR * 0.6)), ink);
                 visor.position.set(0, headY + headR * 0.1, headR * 0.65);
                 root.add(visor);
+                // lenses sit on the visor's front face (eyes used to poke through it)
+                const lensGeo = geo('lens' + headR.toFixed(3), () => new THREE.CircleGeometry(headR * 0.16, 14));
+                for (const lx of [-0.45, 0.45]) {
+                    const lens = new THREE.Mesh(lensGeo, basicMat(0xfff0b0));
+                    lens.position.set(lx * headR, headY + headR * 0.1, headR * 0.65 + headR * 0.3 + 0.01);
+                    root.add(lens);
+                }
                 const barrel = new THREE.Mesh(geo('barrel' + s, () => new THREE.BoxGeometry(s * 0.12, s * 0.12, s * 1.3)), toonMat(PAL.ink));
-                barrel.position.set(s * 0.42, 0.05 * s, s * 0.45);
+                barrel.position.set(s * 0.5, 0.05 * s, s * 0.45);
                 root.add(barrel);
             }
             if (kind === 'scout') {
@@ -411,22 +418,98 @@ const Toon = (() => {
         outline(m, 1.25);
         return m;
     }
+    // ── Pickups (Golden Hour Toon) ──
+    // Each pickup is an empty carrier mesh (owns the theme colour, so the game's
+    // d.mesh.material.color keeps working for impacts) holding a spinning,
+    // bobbing toon model with ink outlines and a soft ring on the ground.
+    const DROP_COL = { hp: 0xf2545b, ammo: 0xe9a93f, secondary: 0xd9925f, speed: 0xb98cf0, shield: 0x8cc8f5, rapid: 0xff9f4a, overclock: 0xffd25e };
+    function extrude(key, pts, depth, bevel) {
+        return geo(key, () => {
+            const sh = new THREE.Shape();
+            pts.forEach((p, i) => i ? sh.lineTo(p[0], p[1]) : sh.moveTo(p[0], p[1]));
+            sh.closePath();
+            const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 6 });
+            g.center();
+            return g;
+        });
+    }
     function makeDrop(kind) {
-        const cols = { hp: 0x7fd6a4, ammo: 0x7cc3d6, secondary: 0xffc857, speed: 0xc6a2f0, shield: 0x9fd0ff, rapid: 0xffb36b, overclock: 0xfff4e2 };
-        const col = cols[kind] || 0xfff4e2;
-        let g;
-        if (kind === 'hp')            g = geo('dropHp', () => { const a = new THREE.BoxGeometry(0.9, 0.3, 0.3); return a; });
-        else if (kind === 'secondary') g = geo('dropRk', () => new THREE.BoxGeometry(0.8, 0.3, 1.4));
-        else g = geo('dropOct' + (kind === 'ammo' ? 'a' : 'p'), () => new THREE.OctahedronGeometry(kind === 'ammo' ? 0.55 : 0.65));
-        const mat = new THREE.MeshToonMaterial({ color: col, emissive: col, emissiveIntensity: 0.35, gradientMap: getRamp() });
-        const m = new THREE.Mesh(g, mat);
-        m.castShadow = true;
-        if (kind === 'hp') {
-            const bar = new THREE.Mesh(geo('dropHp2', () => new THREE.BoxGeometry(0.3, 0.9, 0.3)), mat);
-            m.add(bar); outline(bar, 1.25);
+        const col = DROP_COL[kind] || PAL.cream;
+        const root = new THREE.Mesh(geo('empty', () => {
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
+            g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 0.01);
+            return g;
+        }), basicMat(col));
+        root.frustumCulled = false;
+        const spin = new THREE.Group();
+        root.add(spin);
+        const main = toonMat(col, { emissive: col, emissiveIntensity: 0.22 });
+        const cream = toonMat(PAL.cream, { emissive: PAL.cream, emissiveIntensity: 0.12 });
+        const ink = toonMat(PAL.ink);
+        const add = (parent, g, m, x, y, z, o) => { const me = new THREE.Mesh(g, m); me.position.set(x, y, z); me.castShadow = true; if (o) outline(me, o); parent.add(me); return me; };
+        if (kind === 'hp') {                       // cream medkit, red cross both sides, ink handle
+            add(spin, geo('dkHp', () => new THREE.BoxGeometry(0.78, 0.56, 0.36)), cream, 0, 0, 0, 1.1);
+            const lid = add(spin, geo('dkHpLid', () => new THREE.BoxGeometry(0.82, 0.1, 0.4)), main, 0, 0.2, 0);
+            lid.castShadow = false;
+            add(spin, geo('dkHpHdl', () => new THREE.TorusGeometry(0.13, 0.035, 6, 14, Math.PI)), ink, 0, 0.3, 0);
+            for (const sz of [-1, 1]) {            // bars at different depths: no coplanar faces
+                add(spin, geo('dkHpX1', () => new THREE.BoxGeometry(0.34, 0.1, 0.05)), main, 0, -0.06, sz * 0.19);
+                add(spin, geo('dkHpX2', () => new THREE.BoxGeometry(0.1, 0.34, 0.07)), main, 0, -0.06, sz * 0.19);
+            }
+        } else if (kind === 'ammo') {               // chunky mustard ammo box with brass rounds on top
+            add(spin, geo('dkAm', () => new THREE.BoxGeometry(0.74, 0.42, 0.46)), main, 0, -0.06, 0, 1.1);
+            add(spin, geo('dkAmBand', () => new THREE.BoxGeometry(0.76, 0.1, 0.48)), cream, 0, -0.04, 0);
+            const brass = toonMat(0xffd58a, { emissive: 0xffd58a, emissiveIntensity: 0.15 });
+            for (const bx of [-0.2, 0, 0.2]) {
+                add(spin, geo('dkAmB', () => new THREE.CylinderGeometry(0.065, 0.065, 0.2, 10)), brass, bx, 0.24, 0);
+                add(spin, geo('dkAmT', () => new THREE.ConeGeometry(0.065, 0.12, 10)), ink, bx, 0.4, 0);
+            }
+        } else if (kind === 'secondary') {          // wooden rocket crate with a rocket strapped on top
+            add(spin, geo('dkRkC', () => new THREE.BoxGeometry(0.9, 0.36, 0.56)), main, 0, -0.1, 0, 1.08);
+            for (const px of [-0.3, 0.3]) add(spin, geo('dkRkS', () => new THREE.BoxGeometry(0.07, 0.38, 0.58)), ink, px, -0.1, 0);
+            const r = new THREE.Group(); r.position.set(0, 0.2, 0); r.rotation.z = Math.PI / 2; spin.add(r);
+            add(r, geo('dkRkB', () => new THREE.CylinderGeometry(0.1, 0.1, 0.6, 12)), cream, 0, 0, 0, 1.12);
+            add(r, geo('dkRkN', () => new THREE.ConeGeometry(0.1, 0.2, 12)), toonMat(DROP_COL.hp), 0, 0.4, 0);
+            for (const a of [0, Math.PI / 2, Math.PI, Math.PI * 1.5]) {
+                const f = add(r, geo('dkRkF', () => new THREE.BoxGeometry(0.03, 0.14, 0.12)), ink, Math.sin(a) * 0.12, -0.26, Math.cos(a) * 0.12);
+                f.rotation.y = a;
+            }
+        } else if (kind === 'speed') {               // lightning bolt
+            add(spin, extrude('dkSp', [[0.08, 0.5], [-0.24, 0.0], [-0.02, 0.0], [-0.12, -0.5], [0.24, 0.08], [0.02, 0.08]], 0.14, 0.03), main, 0, 0, 0, 1.1);
+        } else if (kind === 'shield') {              // shield badge with a cream inner plate
+            const pts = [[0, 0.42], [0.34, 0.3], [0.32, -0.04], [0, -0.42], [-0.32, -0.04], [-0.34, 0.3]];
+            add(spin, extrude('dkSh', pts, 0.12, 0.03), main, 0, 0, 0, 1.1);
+            for (const sz of [-1, 1]) add(spin, extrude('dkShIn', pts.map(p => [p[0] * 0.55, p[1] * 0.55]), 0.04, 0.01), cream, 0, 0, sz * 0.1);
+        } else if (kind === 'rapid') {               // triple chevron (fast fire)
+            const chev = [[-0.3, 0.12], [0, -0.14], [0.3, 0.12], [0.3, 0.26], [0, 0.0], [-0.3, 0.26]];
+            for (const cy of [-0.22, 0, 0.22]) add(spin, extrude('dkRp', chev, 0.12, 0.025), main, 0, cy + 0.06, 0, 1.12);
+        } else {                                     // overclock: chunky star
+            const pts = [];
+            for (let i = 0; i < 10; i++) { const a = Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? 0.2 : 0.46; pts.push([Math.cos(a) * rr, Math.sin(a) * rr]); }
+            add(spin, extrude('dkOc', pts, 0.14, 0.03), main, 0, 0, 0, 1.1);
+            for (const sz of [-1, 1]) add(spin, geo('dkOcC', () => new THREE.CircleGeometry(0.09, 16)), cream, 0, 0.02, sz * 0.105).rotation.y = sz < 0 ? Math.PI : 0;
         }
-        outline(m, 1.18);
-        return m;
+        // soft ground ring (drops sit at y = 0.8 in the game; the ring lies on the ground)
+        const ring = new THREE.Mesh(geo('dkRing', () => new THREE.RingGeometry(0.42, 0.56, 40).rotateX(-Math.PI / 2)),
+            basicMat(col, { transparent: true, opacity: 0.55, depthWrite: false }));
+        ring.position.y = -0.76; ring.renderOrder = 2;
+        const glow = new THREE.Mesh(geo('dkGlow', () => new THREE.CircleGeometry(0.42, 32).rotateX(-Math.PI / 2)),
+            basicMat(PAL.cream, { transparent: true, opacity: 0.22, depthWrite: false }));
+        glow.position.y = -0.77; glow.renderOrder = 1;
+        root.add(ring, glow);
+        root.userData.drop = { spin, ring, phase: Math.random() * 6.28 };
+        return root;
+    }
+    // gentle bob + spin, ring breathes; called every frame for each drop
+    function animateDrop(m, now) {
+        const d = m.userData.drop; if (!d) return;
+        const t = now * 0.001 + d.phase;
+        d.spin.rotation.y = t * 1.6;
+        d.spin.position.y = Math.sin(t * 2.4) * 0.12;
+        d.spin.rotation.z = Math.sin(t * 1.3) * 0.08;
+        const s = 1 + Math.sin(t * 2.4) * 0.08;
+        d.ring.scale.set(s, 1, s);
     }
 
     // ── Paper confetti (one instanced draw call) ──
@@ -514,7 +597,7 @@ const Toon = (() => {
             add(new THREE.BoxGeometry(0.09, 0.2, 0.1), darkM, 0, -0.14, 0.08).rotation.x = -0.25;
             add(new THREE.BoxGeometry(0.125, 0.045, 0.24), accentM, 0, 0.078, -0.01);
             add(new THREE.BoxGeometry(0.02, 0.09, 0.03), railM, 0.066, 0, -0.04);
-            add(new THREE.BoxGeometry(0.02, 0.03, 0.09), railM, 0.066, 0, -0.04);
+            add(new THREE.BoxGeometry(0.03, 0.03, 0.09), railM, 0.071, 0, -0.04);
             muzzleZ = -0.34;
         } else {                            // striker: the balanced rifle-pistol
             add(new THREE.BoxGeometry(0.12, 0.13, 0.46), bodyM, 0, 0, 0, 1.06);
@@ -523,7 +606,7 @@ const Toon = (() => {
             add(new THREE.BoxGeometry(0.09, 0.2, 0.1), darkM, 0, -0.14, 0.12).rotation.x = -0.25;
             add(new THREE.BoxGeometry(0.07, 0.16, 0.08), accentM, 0, -0.13, -0.08);
             add(new THREE.BoxGeometry(0.04, 0.05, 0.04), railM, 0, 0.1, 0.16);
-            add(new THREE.BoxGeometry(0.125, 0.03, 0.2), railM, 0, -0.05, -0.12);
+            add(new THREE.BoxGeometry(0.125, 0.03, 0.2), railM, 0, -0.058, -0.12);
         }
         return muzzleZ;
     }
@@ -553,7 +636,7 @@ const Toon = (() => {
         const suit = toonMat(col), cream = toonMat(PAL.cream), ink = toonMat(PAL.ink);
         const body = new THREE.Mesh(geo('opBody' + bulk, () => new THREE.CylinderGeometry(0.36 * bulk, 0.42 * bulk, 0.9, 14)), suit);
         body.position.y = 0.75; outline(body, 1.08); root.add(body);
-        const belt = new THREE.Mesh(geo('opBelt' + bulk, () => new THREE.CylinderGeometry(0.425 * bulk, 0.425 * bulk, 0.1, 14)), ink);
+        const belt = new THREE.Mesh(geo('opBelt' + bulk, () => new THREE.CylinderGeometry(0.45 * bulk, 0.45 * bulk, 0.1, 14)), ink);
         belt.position.y = 0.42; root.add(belt);
         const head = new THREE.Mesh(geo('opHead', () => new THREE.SphereGeometry(0.3, 18, 14)), cream);
         head.position.y = 1.45; outline(head, 1.08); root.add(head);
@@ -563,13 +646,13 @@ const Toon = (() => {
         shine.position.set(-0.1, 1.5, 0.315); root.add(shine);
         if (op === 'medic') {
             const c1 = new THREE.Mesh(geo('opX1', () => new THREE.BoxGeometry(0.22, 0.07, 0.04)), cream);
-            const c2 = new THREE.Mesh(geo('opX2', () => new THREE.BoxGeometry(0.07, 0.22, 0.04)), cream);
-            c1.position.set(0, 0.85, 0.42); c2.position.set(0, 0.85, 0.42); root.add(c1, c2);
+            const c2 = new THREE.Mesh(geo('opX2', () => new THREE.BoxGeometry(0.07, 0.22, 0.06)), cream);
+            c1.position.set(0, 0.85, 0.42 * bulk); c2.position.set(0, 0.85, 0.42 * bulk); root.add(c1, c2);
         }
         if (op === 'enforcer') {
             for (const sx of [-1, 1]) {
                 const pad = new THREE.Mesh(geo('opPad', () => new THREE.BoxGeometry(0.28, 0.2, 0.42)), cream);
-                pad.position.set(sx * 0.5, 1.12, 0); outline(pad, 1.1); root.add(pad);
+                pad.position.set(sx * 0.6, 1.16, 0); outline(pad, 1.1); root.add(pad);
             }
         }
         if (op === 'phantom') {
@@ -588,8 +671,17 @@ const Toon = (() => {
         addGunParts(g, op, toonMat(col));
         g.scale.setScalar(1.15);
         g.rotation.y = Math.PI;            // muzzle toward the viewer like the figure
-        g.position.set(0.32 * bulk, 0.82, 0.38);
+        g.position.set(0.5 * bulk, 0.8, 0.62 * bulk);   // clear of the body (it used to clip into the torso)
         root.add(g);
+        // a stubby arm from the shoulder to the grip, so the gun is held, not floating
+        const a0 = new THREE.Vector3(0.33 * bulk, 1.08, 0.08), a1 = new THREE.Vector3(0.5 * bulk, 0.68, 0.47 * bulk);
+        const len = a0.distanceTo(a1);
+        const arm = new THREE.Mesh(geo('opArm' + bulk, () => new THREE.CylinderGeometry(0.075, 0.075, len, 10)), suit);
+        arm.position.copy(a0).add(a1).multiplyScalar(0.5);
+        arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a1.clone().sub(a0).normalize());
+        outline(arm, 1.12); root.add(arm);
+        const hand = new THREE.Mesh(geo('opHand', () => new THREE.SphereGeometry(0.085, 10, 8)), cream);
+        hand.position.copy(a1); root.add(hand);
         root.userData.op = op;
         return root;
     }
@@ -658,5 +750,5 @@ const Toon = (() => {
         for (const e of enemies) animateEnemy(e, nowMs);
     }
 
-    return { PAL, OP_COLORS, buildWorld, makeEnemy, makeOperative, isHeadshot, makeBullet, makeEnemyBullet, makeRocket, makeDrop, burst, ringPop, gunFire, setGunSkin, setTracerColor, update, toonMat };
+    return { PAL, OP_COLORS, buildWorld, makeEnemy, makeOperative, isHeadshot, makeBullet, makeEnemyBullet, makeRocket, makeDrop, animateDrop, DROP_COL, burst, ringPop, gunFire, setGunSkin, setTracerColor, update, toonMat };
 })();
