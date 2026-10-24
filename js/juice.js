@@ -447,7 +447,7 @@ const Juice = (() => {
         if (picking) {
             picking = false;
             gamePaused = false;
-            if (!isMobile) document.body.requestPointerLock();
+            if (!isMobile) lockPointer();
             startAmbient();
             animate();
         }

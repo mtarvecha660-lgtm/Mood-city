@@ -7,9 +7,18 @@ let lookTouch = { active: false, id: null, lastX: 0, lastY: 0 };
 function setupControls() {
     // ── Keyboard ──
     document.addEventListener('keydown', e => {
+        const tg = e.target, typing = tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable);
+        if (typing) return;
         keys[e.key.toLowerCase()] = true;
         if (e.key.toLowerCase() === 'r') reload();
-        if (e.key.toLowerCase() === 'f') fireSecondary();
+        if (e.key.toLowerCase() === 'f' && !e.repeat) {
+            // In the middle of a run F stays the rocket; anywhere else (menu,
+            // pause, game over, co-op lobby) F toggles fullscreen.
+            const pm = document.getElementById('pause-menu');
+            const playing = gameRunning && !gamePaused && !(pm && pm.style.display === 'flex');
+            if (playing) fireSecondary();
+            else if (typeof Fullscreen !== 'undefined') Fullscreen.toggle();
+        }
         if (e.key.toLowerCase() === 'q' || e.key.toLowerCase() === 'v') toggleMelee();
     });
     document.addEventListener('keyup', e => {

@@ -549,6 +549,7 @@ function init() {
     if (!renderer) {
         renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.domElement.id = 'game-canvas';
         document.body.appendChild(renderer.domElement);
     }
     renderer.domElement.style.visibility = '';   // hidden while on the menu (exitToMenu)
@@ -1641,10 +1642,12 @@ function triggerGameOver() {
 
 function startGame() {
     checkDevice();
-    if (isMobile) {
-        requestFullscreen();
-        if (!isLandscape()) { updateOrientationOverlay(); return; }
-    }
+    // Inside the PLAY click: phones AND laptops/desktops. On desktop the pointer
+    // lock goes first: Chrome's fullscreen request uses up the click's user
+    // gesture, and a pointer lock asked for after it is refused.
+    if (!isMobile) lockPointer();
+    requestFullscreen();
+    if (isMobile && !isLandscape()) { updateOrientationOverlay(); return; }
     startGameCore();
 }
 
@@ -1677,7 +1680,7 @@ function beginGame() {
     document.getElementById('crosshair').style.display  = 'block';
     document.getElementById('minimap').style.display    = 'block';
     document.getElementById('boosts-hud').style.display = 'flex';
-    if (!isMobile) document.body.requestPointerLock();
+    if (!isMobile) { if (!document.pointerLockElement) lockPointer(); }
     else {
         requestFullscreen();
         document.getElementById('mobile-controls').style.display = 'block';
@@ -1794,7 +1797,7 @@ function resumeGame() {
     gamePaused = false;
     Juice.onPause(false);
     document.getElementById('pause-menu').style.display = 'none';
-    if (!isMobile) document.body.requestPointerLock();
+    if (!isMobile) { lockPointer(); if (typeof Fullscreen !== 'undefined') Fullscreen.resume(); }   // lock first (see startGame)
     // Only restart the loop if it was fully stopped (not just paused)
     animate();
 }
@@ -1803,7 +1806,7 @@ function resumeGame() {
 // fullscreen (browsers only allow re-entering on a fresh tap), which is why the
 // game kept dropping out of fullscreen after ABORT / MENU.
 function exitToMenu() {
-    if ((window.Coop && Coop.active)) Coop.leave();
+    if (window.Coop) Coop.leave();     // always: ends any co-op session (peer, room, teammates, overlays)
     if (!aiAssistedRun && score > highScore) { highScore = score; localStorage.setItem('msc_highscore', highScore); }
     if (typeof NEXUS !== 'undefined') { if (NEXUS.isTraining) NEXUS.stopTraining(); if (NEXUS.on) NEXUS.disable(); }
     gameRunning = false; gamePaused = false; tutorialMode = false;
@@ -1842,12 +1845,26 @@ document.addEventListener('pointerlockchange', () => {
 
 // ── Resize ──
 
-window.addEventListener('resize', () => {
+// The canvas always fills the window. Entering/leaving fullscreen changes the
+// viewport, and some browsers report the new size a frame or two after the
+// fullscreenchange event, so refit then and again shortly after.
+function fitView() {
     if (!camera || !renderer) return;
-    camera.aspect = window.innerWidth / window.innerHeight;
+    const w = window.innerWidth, h = window.innerHeight;
+    if (!w || !h) return;
+    camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
+    renderer.setSize(w, h);
+}
+window.addEventListener('resize', fitView);
+['fullscreenchange', 'webkitfullscreenchange'].forEach(t => document.addEventListener(t, () => {
+    fitView(); requestAnimationFrame(fitView); setTimeout(fitView, 250);
+    // desktop: if fullscreen took the pointer lock with it mid-run, take it back
+    if (!isMobile && gameRunning && !gamePaused && !document.pointerLockElement) {
+        const pm = document.getElementById('pause-menu');
+        if (!pm || pm.style.display !== 'flex') lockPointer();
+    }
+}));
 
 document.getElementById('menu-hs').innerText = highScore.toLocaleString();
 updateMenuSelectedChar();

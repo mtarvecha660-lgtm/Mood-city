@@ -52,6 +52,65 @@ const Fullscreen = (() => {
     // called by menus / screens after they change; the next tap re-enters if needed
     function ensure() { if (isTouch()) wanted = true; }
 
+    // ── Desktop / laptop ──
+    // The touch path above re-enters on any tap. On a laptop that would be
+    // annoying (Esc out, click anything, you're thrown back in), so desktop only
+    // goes fullscreen on explicit gestures: PLAY, START RUN, JOIN, RESUME, the ⛶
+    // button and the F key. `deskWanted` remembers whether the player wants it,
+    // so RESUME after an Esc brings it back unless they turned it off with ⛶ / F.
+    let deskWanted = false;
+    function rawEnter() {
+        if (isFs() || !api) return;
+        try {
+            const p = api.call(el, { navigationUI: 'hide' });
+            if (p && p.then) p.then(() => {}, () => {});
+        } catch (e) {}
+    }
+    function rawExit() {
+        const ex = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+        if (!ex || !isFs()) return;
+        try { const p = ex.call(document); if (p && p.then) p.then(() => {}, () => {}); } catch (e) {}
+    }
+    // Call from inside a click / key handler (the user gesture fullscreen needs).
+    function request() {
+        if (isTouch()) { enter(); return; }
+        deskWanted = true;
+        if (standalone() || !supported) return;
+        rawEnter();
+    }
+    // RESUME / re-lock on desktop: come back to fullscreen if they had it on.
+    function resume() {
+        if (isTouch()) { enter(); return; }
+        if (deskWanted && supported) rawEnter();
+    }
+    function toggle() {
+        if (isFs()) { wanted = false; deskWanted = false; rawExit(); return; }
+        wanted = true; deskWanted = true;
+        if (!supported) { if (isIOS) showIOSHint(); return; }
+        rawEnter();
+        if (isTouch()) setTimeout(lockLandscape, 300);
+    }
+    function syncButtons() {
+        const on = isFs();
+        document.querySelectorAll('.fs-btn').forEach(b => {
+            b.classList.toggle('is-fs', on);
+            b.setAttribute('aria-label', on ? 'Exit full screen (F)' : 'Full screen (F)');
+            b.title = on ? 'Exit full screen (F)' : 'Full screen (F)';
+        });
+    }
+    function bindButtons() {
+        document.querySelectorAll('.fs-btn').forEach(b => {
+            if (b._fsBound) return; b._fsBound = true;
+            // already fullscreen as an installed app, or no way to go fullscreen at all: hide it
+            if (standalone() || (!supported && !isIOS)) { b.style.display = 'none'; b.classList.add('fs-off'); return; }
+            b.addEventListener('click', ev => { ev.stopPropagation(); if (typeof Sound !== 'undefined' && Sound.uiClick) Sound.uiClick(); toggle(); b.blur(); });
+            ['touchstart', 'mousedown', 'pointerdown'].forEach(t => b.addEventListener(t, ev => ev.stopPropagation(), { passive: true }));
+        });
+        syncButtons();
+    }
+    ['fullscreenchange', 'webkitfullscreenchange'].forEach(t => document.addEventListener(t, syncButtons));
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindButtons); else bindButtons();
+
     function showIOSHint() {
         try { if (localStorage.getItem('msc_ios_hint')) return; } catch (e) {}
         if (document.getElementById('ios-fs-hint')) return;
@@ -71,10 +130,17 @@ const Fullscreen = (() => {
     document.addEventListener('webkitfullscreenchange', () => { if (isFs()) lockLandscape(); });
     if (isTouch()) wanted = true;   // touch devices: fullscreen from the very first tap
 
-    return { enter, ensure, isFs, supported, isIOS, standalone };
+    return { enter, ensure, isFs, supported, isIOS, standalone, request, resume, toggle, exit: rawExit, bindButtons };
 })();
 
-function requestFullscreen() { Fullscreen.enter(); }
+// Inside a user gesture: phones keep their old behaviour, desktops go fullscreen too.
+function requestFullscreen() { Fullscreen.request(); }
+
+// requestPointerLock returns a Promise in current Chrome; a refusal (no gesture,
+// mid fullscreen switch) must not throw an unhandled rejection.
+function lockPointer() {
+    try { const p = document.body.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+}
 
 // ── Gyroscope aim ──
 // What was wrong before: it read raw Euler beta/gamma deltas as if beta = turn and

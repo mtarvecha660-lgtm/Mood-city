@@ -536,3 +536,20 @@ body.melee-mode .ammo-counter { opacity: 0.55; }
 .settings-note { display: block; font-size: 10px; letter-spacing: 0.5px; opacity: 0.7; text-transform: none; font-weight: 400; margin-top: 2px; }
 .settings-mini { margin-left: 8px; font: inherit; font-size: 10px; padding: 3px 8px; border-radius: 999px; border: none; background: rgba(255, 244, 226, 0.85); color: #3a2733; cursor: pointer; }
 .floating-pop.pop-warn { color: #ffc857; font-family: var(--font-display); font-weight: 700; text-shadow: 0 2px 0 #3a2733; }
+
+/* ── Fullscreen toggle (⛶) + full-window game canvas ── */
+#game-canvas { position: fixed; left: 0; top: 0; display: block; z-index: 0; }
+.fs-btn {
+    position: fixed; z-index: 30; width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--plum-glass); color: var(--cream); font-size: 20px; line-height: 40px; padding: 0;
+    backdrop-filter: blur(6px); pointer-events: auto; font-family: system-ui, -apple-system, 'Segoe UI Symbol', sans-serif;
+}
+.fs-btn:hover { filter: brightness(1.15); }
+.fs-btn.is-fs { background: var(--cream); color: var(--plum); }
+#fs-btn-menu { position: absolute; top: 14px; right: 62px; }
+#fs-btn-hud { display: none; top: 16px; left: 50%; transform: translateX(218px); }
+body.in-run #fs-btn-hud { display: block; }
+body.in-run #fs-btn-hud.fs-off { display: none; }
+@media (pointer: coarse), (max-height: 520px) {
+    #fs-btn-hud { top: 106px; right: 14px; left: auto; transform: none; width: 36px; height: 36px; line-height: 36px; font-size: 17px; }
+}
