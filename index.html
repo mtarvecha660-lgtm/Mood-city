@@ -11,9 +11,11 @@
     <!-- Google Fonts for Gen-Z Arcade Aesthetic -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Space+Grotesk:wght@500;700;800&family=Syne:wght@700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="css/style.css?v=10">
+    <meta name="theme-color" content="#f6c6a4">
+    <link rel="stylesheet" href="css/style.css?v=11">
+    <link rel="stylesheet" href="css/golden.css?v=11">
 </head>
 <body>
 
@@ -28,6 +30,8 @@
 
 <!-- ══ MAIN MENU ══ -->
 <div id="menu">
+    <div id="menu-sky"><div class="sky-sun"></div><div id="skyline-back" class="skyline"></div><div id="skyline-front" class="skyline"></div></div>
+    <button class="mute-btn" id="mute-btn-menu" aria-label="Mute">🔊</button>
     <div id="menu-grid"></div>
     <div class="scanlines-overlay"></div>
     <div id="menu-ambient-glow"></div>
@@ -35,7 +39,7 @@
 
     <div id="menu-content">
         <div id="menu-logo">
-            <div id="menu-tag"><span class="status-pulse-dot"></span> HYPER-ARCADE PROTOCOL // v4.2</div>
+            <div id="menu-tag">GOLDEN HOUR EDITION</div>
             <h1 id="menu-title" data-text="MOOD SHIFT CITY">
                 <span class="title-p1">MOOD SHIFT</span>
                 <span class="title-p2">CITY</span>
@@ -45,7 +49,7 @@
 
         <div class="menu-stats-bar">
             <div id="menu-best" class="glass-pill">
-                <span class="menu-label">TOP SIGNAL</span>
+                <span class="menu-label">BEST</span>
                 <span id="menu-hs" class="menu-hs-val">0</span>
             </div>
 
@@ -55,6 +59,22 @@
                 <span id="menu-rank-val" class="menu-rank-name">ROOKIE</span>
                 <span id="menu-xp-val" class="menu-xp-label">0 XP</span>
                 <div id="menu-rank-bar"><div id="menu-rank-prog"></div></div>
+            </div>
+
+            <!-- Level + next unlock -->
+            <div id="menu-level-row" class="glass-pill">
+                <span class="menu-label">LEVEL</span>
+                <span id="menu-level" class="menu-level-num">1</span>
+                <div id="menu-level-bar"><div id="menu-level-fill"></div></div>
+                <span id="menu-next" class="menu-next"></span>
+            </div>
+
+            <!-- Gun skin (unlocked by level) -->
+            <div id="menu-skin-row" class="glass-pill">
+                <span class="menu-label">GUN SKIN</span>
+                <button class="skin-arrow" onclick="Juice.cycleSkin(-1)" aria-label="Previous skin">&#8249;</button>
+                <span id="skin-swatch"></span><span id="skin-name">SUNBEAM</span>
+                <button class="skin-arrow" onclick="Juice.cycleSkin(1)" aria-label="Next skin">&#8250;</button>
             </div>
 
             <!-- Selected operative display -->
@@ -76,7 +96,7 @@
 
         <div id="menu-buttons">
             <button id="start-btn" onclick="startGame()">
-                <span class="btn-arrow">&#9658;</span> DEPLOY
+                <span class="btn-arrow">&#9658;</span> PLAY
             </button>
             <div class="menu-btn-row">
                 <button id="codex-btn" class="secondary-menu-btn" onclick="openCodex('operatives'); if (typeof Sound !== 'undefined') Sound.uiClick();">
@@ -95,9 +115,10 @@
             <div class="menu-section-label">HOTKEYS</div>
             <div class="ctrl-grid">
                 <div class="ctrl-tag"><span class="ctrl-key">WASD</span> <span class="ctrl-act">MOVE</span></div>
-                <div class="ctrl-tag"><span class="ctrl-key">MOUSE</span> <span class="ctrl-act">AIM & FIRE</span></div>
+                <div class="ctrl-tag"><span class="ctrl-key">MOUSE</span> <span class="ctrl-act">AIM · HOLD TO FIRE</span></div>
                 <div class="ctrl-tag"><span class="ctrl-key">R</span> <span class="ctrl-act">RELOAD</span></div>
                 <div class="ctrl-tag"><span class="ctrl-key">F</span> <span class="ctrl-act">ROCKET</span></div>
+                <div class="ctrl-tag"><span class="ctrl-key">M</span> <span class="ctrl-act">MUTE</span></div>
                 <div class="ctrl-tag"><span class="ctrl-key">ALT+T</span> <span class="ctrl-act">AI SIM</span></div>
             </div>
         </div>
@@ -241,11 +262,12 @@
 
     <!-- Top Right: Score & Multiplier -->
     <div class="hud-module hud-score-panel">
-        <div class="score-label">SIGNAL SCORE</div>
+        <div class="score-label">SCORE</div>
         <div class="score-value-row">
             <span id="score-val">0</span>
             <span id="combo-display" style="display:none;" class="combo-pill">&#215;<span id="combo-val">1</span></span>
         </div>
+        <div id="combo-meter"><div id="combo-meter-fill"></div></div>
     </div>
 
     <!-- Bottom Center/Right: Munitions & Secondary -->
@@ -263,6 +285,15 @@
         <div id="reload-msg" onclick="reload()">&#x21BA; RELOAD NOW <span class="key-hint">[R]</span></div>
     </div>
 </div>
+
+<!-- Center-screen callouts (DOUBLE KILL, RAMPAGE, HEADSHOT, BOSS DOWN…) -->
+<div id="callout"></div>
+
+<!-- Perk pick between waves -->
+<div id="perk-modal"></div>
+
+<!-- In-run mute toggle -->
+<button class="mute-btn" id="mute-btn-hud" aria-label="Mute">🔊</button>
 
 <!-- Floating Combat Feedback Layer (Kill pops, headshots, combos) -->
 <div id="feedback-layer"></div>
@@ -319,28 +350,32 @@
 
 <!-- Scripts -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="js/state.js?v=10"></script>
-<script src="js/audio.js?v=10"></script>
-<script src="js/mobile.js?v=10"></script>
-<script src="js/controls.js?v=10"></script>
-<script src="js/tutorial.js?v=10"></script>
-<script src="js/game.js?v=10"></script>
-<script src="js/ai-player.js?v=10"></script>
+<script src="js/state.js?v=11"></script>
+<script src="js/audio.js?v=11"></script>
+<script src="js/mobile.js?v=11"></script>
+<script src="js/controls.js?v=11"></script>
+<script src="js/tutorial.js?v=11"></script>
+<script src="js/toon.js?v=11"></script>
+<script src="js/juice.js?v=11"></script>
+<script src="js/game.js?v=11"></script>
+<script src="js/ai-player.js?v=11"></script>
 <script>
+// Menu backdrop: two layers of flat skyline silhouettes
 (function() {
-    const rain = document.getElementById('menu-rain');
-    if (rain) {
-        for (let i = 0; i < 45; i++) {
-            const drop = document.createElement('div');
-            drop.className = 'rain-drop';
-            drop.style.left              = Math.random() * 100 + '%';
-            drop.style.animationDuration = (0.5 + Math.random() * 0.9) + 's';
-            drop.style.animationDelay    = (Math.random() * 2) + 's';
-            drop.style.opacity           = 0.2 + Math.random() * 0.35;
-            drop.style.height            = (40 + Math.random() * 70) + 'px';
-            rain.appendChild(drop);
+    [['skyline-back', 34, 18, 42], ['skyline-front', 22, 10, 30]].forEach(([id, n, min, max]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        let x = -2;
+        for (let i = 0; i < n && x < 102; i++) {
+            const b = document.createElement('span');
+            const w = 3 + Math.random() * 5;
+            b.style.left = x + '%';
+            b.style.width = w + '%';
+            b.style.height = (min + Math.random() * (max - min)) + '%';
+            el.appendChild(b);
+            x += w + Math.random() * 1.2;
         }
-    }
+    });
 })();
 </script>
 </body>

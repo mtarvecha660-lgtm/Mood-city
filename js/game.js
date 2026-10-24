@@ -504,11 +504,12 @@ function checkCollision(pos, radius) {
 // Memory-safe mesh disposal
 function disposeMesh(mesh) {
     if (!mesh) return;
-    if (mesh.geometry) mesh.geometry.dispose();
+    const own = o => o && !(o.userData && o.userData.shared);
+    if (own(mesh.geometry)) mesh.geometry.dispose();
     if (mesh.material) {
         if (Array.isArray(mesh.material)) {
-            mesh.material.forEach(m => m.dispose());
-        } else {
+            mesh.material.forEach(m => { if (own(m)) m.dispose(); });
+        } else if (own(mesh.material)) {
             mesh.material.dispose();
         }
     }
@@ -516,83 +517,34 @@ function disposeMesh(mesh) {
 }
 
 function createImpact(pos, color, count = 8) {
-    for (let i = 0; i < count; i++) {
-        let p = particles.find(p => !p.active);
-        if (!p) break;
-        p.active = true; p.mesh.visible = true; p.life = 1.0;
-        p.mesh.position.copy(pos);
-        p.mesh.material.color.setHex(color);
-        p.velocity.set(
-            (Math.random() - 0.5) * 0.4,
-            (Math.random() - 0.2) * 0.4,
-            (Math.random() - 0.5) * 0.4
-        );
-    }
+    // Paper-confetti FX (Toon). Enemy-ish colours burst in the coral accent, the rest as warm dust.
+    const enemyCols = [0xff0040, 0xff4400, 0xff6600, 0xffff00, 0x00ff66, 0xaa00ff, 0xff5a3c];
+    const kind = color === 0xff0000 ? 'player' : (enemyCols.includes(color) ? 'enemy' : 'dust');
+    Toon.burst(pos, kind, Math.ceil(count * 0.8), kind === 'dust' ? 0.5 : 1);
 }
 
 // ── Scene init ──
 
 function init() {
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000005);
-    scene.fog = new THREE.FogExp2(0x000011, 0.04);
-
     camera   = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    
+
     // WebGL Context Fix: Only initialize renderer if it does not exist
     if (!renderer) {
-        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
     }
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.2));
-    let sun = new THREE.DirectionalLight(0x00ffff, 0.5);
-    sun.position.set(5, 10, 5);
-    scene.add(sun);
-
-    let road = new THREE.Mesh(
-        new THREE.PlaneGeometry(500, 500),
-        new THREE.MeshStandardMaterial({ color: 0x080808 })
-    );
-    road.rotation.x = -Math.PI / 2;
-    scene.add(road);
-
+    // Golden Hour Toon world: sky, light, shadows, buildings, FX pools, gun viewmodel
     buildingLights = [];
-    for (let i = 0; i < 40; i++) {
-        let bh = Math.random() * 20 + 10;
-        let mesh = new THREE.Mesh(
-            new THREE.BoxGeometry(5, bh, 5),
-            new THREE.MeshStandardMaterial({ color: Math.random() > 0.5 ? 0x111111 : 0x1a1a1a })
-        );
-        let bx = Math.random() * 200 - 100, bz = Math.random() * 200 - 100;
-        if (Math.abs(bx) < 15 && Math.abs(bz) < 15) bx += 25;
-        mesh.position.set(bx, bh / 2, bz);
-        scene.add(mesh);
-        buildings.push({ minX: bx - 2.5, maxX: bx + 2.5, minY: 0, maxY: bh, minZ: bz - 2.5, maxZ: bz + 2.5 });
-        if (Math.random() > 0.3) {
-            let win = new THREE.PointLight(Math.random() > 0.5 ? 0xff0040 : 0x00ffff, 1, 15);
-            win.position.set(bx, bh * 0.8, bz);
-            win.userData.baseIntensity = 0.6 + Math.random() * 0.8;
-            win.userData.phase = Math.random() * Math.PI * 2;
-            scene.add(win);
-            buildingLights.push(win);
-        }
-    }
-
-    const pGeo = new THREE.SphereGeometry(PARTICLE_SIZE, 4, 4);
-    for (let i = 0; i < MAX_PARTICLES; i++) {
-        const pMesh = new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true }));
-        pMesh.visible = false;
-        scene.add(pMesh);
-        particles.push({ mesh: pMesh, velocity: new THREE.Vector3(), active: false, life: 0 });
-    }
+    Toon.buildWorld();
 
     player = new THREE.Object3D();
     player.position.set(0, 1.8, 0);
     scene.add(player);
 
-    setupControls();
+    if (!window._controlsBound) { setupControls(); window._controlsBound = true; }
 
     const mm = document.getElementById('minimap');
     mm.width = 150; mm.height = 150;
@@ -601,28 +553,30 @@ function init() {
 // ── Weapons ──
 
 function shoot() {
-    if (!gameRunning || isReloading || ammo <= 0) return;
+    if (!gameRunning || gamePaused || isReloading || ammo <= 0) return;
     const now = performance.now();
     const cd  = (boosts.rapid && Date.now() < boosts.rapid) ? shootCooldown * 0.4 : shootCooldown;
     if (now - lastShotTime < cd) return;
-    ammo--; lastShotTime = now; Sound.shoot(); shakeAmount = 0.12;
-    muzzleFlashAmount = 1.0;
+    ammo--; lastShotTime = now; shakeAmount = Math.max(shakeAmount, burstCount > 1 ? 0.1 : 0.05);
+    Juice.onShoot();
     shotsFired++;
     if (ammo === 0 && !isReloading && reserve > 0) setTimeout(reload, 220);
 
-    const activeDmg = (boosts.overclock && Date.now() < boosts.overclock) ? bulletDmg * 2 : bulletDmg;
-    const spreads = burstCount === 3 ? [-0.22, 0, 0.22] : [0];
+    const hot = boosts.overclock && Date.now() < boosts.overclock;
+    const activeDmg = hot ? bulletDmg * 2 : bulletDmg;
+    let spreads = burstCount === 3 ? [-0.22, 0, 0.22] : [0];
+    if (Juice.extraShots()) spreads = spreads.flatMap(s => [s - 0.025, s + 0.025]);
     for (let s of spreads) {
-        let bullet = new THREE.Mesh(
-            new THREE.SphereGeometry(0.2, 8, 8),
-            new THREE.MeshBasicMaterial({ color: (boosts.overclock && Date.now() < boosts.overclock) ? 0xffffff : 0x00ffff })
-        );
-        bullet.position.copy(player.position);
         let dir = new THREE.Vector3(
             -Math.sin(yaw + s) * Math.cos(pitch),
              Math.sin(pitch),
             -Math.cos(yaw + s) * Math.cos(pitch)
         ).normalize();
+        let bullet = Toon.makeBullet(dir, hot);
+        // start slightly below/right of the eye so tracers read as coming from the gun
+        const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+        bullet.position.copy(player.position).addScaledVector(right, 0.18).add(new THREE.Vector3(0, -0.12, 0));
+        bullet.lookAt(bullet.position.clone().add(dir));
         bullets.push({ mesh: bullet, dir, dist: 0, dmg: activeDmg });
         scene.add(bullet);
     }
@@ -663,22 +617,23 @@ function fireSecondary() {
     muzzleFlashAmount = 1.5;
     shotsFired++;
 
-    const rocketMesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.15, 0.15, 0.8, 6),
-        new THREE.MeshBasicMaterial({ color: 0xffdd00 })
-    );
+    const rocketMesh = Toon.makeRocket();
     rocketMesh.position.copy(player.position);
+    Toon.gunFire(2);
     const dir = new THREE.Vector3(
         -Math.sin(yaw) * Math.cos(pitch),
          Math.sin(pitch),
         -Math.cos(yaw) * Math.cos(pitch)
     ).normalize();
+    rocketMesh.lookAt(rocketMesh.position.clone().add(dir));
+    rocketMesh.rotateX(Math.PI / 2);
     bullets.push({ mesh: rocketMesh, dir, dist: 0, dmg: 100, isRocket: true, aoeRadius: 6 });
     scene.add(rocketMesh);
 }
 
 function rocketExplode(pos) {
-    createImpact(pos, 0xff4400, 40);
+    Toon.burst(pos, 'dust', 40, 1.6);
+    Toon.ringPop(pos, 4, 0xffc857);
     shakeAmount = 0.5;
     const aoeR = 6;
     let hitCount = 0;
@@ -763,9 +718,8 @@ function startWave(num) {
 
     if (num > 1) {
         score += (num - 1) * 100;
-        showWaveBonus(num - 1, (num - 1) * 100);
-        Sound.wave();
     }
+    const myRun = runGen;
 
     wave = num;
     waveDamageTaken = 0;
@@ -789,10 +743,10 @@ function startWave(num) {
     if (isBossWave) {
         const bossBar = document.getElementById('boss-bar-wrapper');
         if (bossBar) bossBar.style.display = 'block';
-        document.getElementById('wave-status').innerText = '// BOSS INCOMING //';
+        document.getElementById('wave-status').innerText = 'BOSS INCOMING';
         Sound.boss();
     } else {
-        document.getElementById('wave-status').innerText = 'SIGNAL STABILIZING...';
+        document.getElementById('wave-status').innerText = 'GET READY';
     }
 
     let count = isBossWave ? 1 : (5 + num * 2);
@@ -800,10 +754,13 @@ function startWave(num) {
     enemiesToSpawn = count;
 
     setTimeout(() => {
-        if (!gameRunning) return;
+        if (!gameRunning || myRun !== runGen) return;
         isWaveTransition = false;
+        Juice.onWaveStart(wave, isBossWave);
         if (!isBossWave) document.getElementById('wave-status').innerText = 'WAVE ' + wave;
         let spawner = setInterval(() => {
+            if (myRun !== runGen) { clearInterval(spawner); return; }
+            if (gamePaused) return;
             if (enemiesToSpawn > 0 && gameRunning) {
                 spawnEnemy(isBossWave);
                 enemiesToSpawn--;
@@ -824,10 +781,7 @@ function spawnEnemy(isBoss) {
         ex = player.position.x + Math.cos(angle) * dist;
         ez = player.position.z + Math.sin(angle) * dist;
 
-        const mesh = new THREE.Mesh(
-            new THREE.BoxGeometry(4, 7.2, 4),
-            new THREE.MeshStandardMaterial({ color: 0xff4400, emissive: 0xff4400, emissiveIntensity: 1.0 })
-        );
+        const mesh = Toon.makeEnemy('boss', 4.0);
         mesh.position.set(ex, 3.6, ez);
         scene.add(mesh);
         enemies.push({
@@ -877,16 +831,13 @@ function spawnEnemy(isBoss) {
         attempts++;
     } while (isPositionInBuilding(ex, ez, type.size / 2 + 0.5) && attempts < 15);
 
-    let mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(type.size, type.size * 1.8, type.size),
-        new THREE.MeshStandardMaterial({ color: type.color, emissive: type.color, emissiveIntensity: 0.8 })
-    );
+    let mesh = Toon.makeEnemy(type.name, type.size);
     mesh.position.set(ex, type.size * 0.9, ez);
     scene.add(mesh);
     enemies.push({
         mesh, hp: type.hp, speed: type.speed, size: type.size, behavior: type.behavior,
         name: type.name || 'ENEMY',
-        colorHex: '#' + type.color.toString(16).padStart(6, '0'),
+        colorHex: '#ff5a3c',
         strafeDir: Math.random() > 0.5 ? 1 : -1,
         nextStrafeChange: Date.now() + 1500,
         shootInterval:  type.shootInterval  || 0,
@@ -904,11 +855,7 @@ function spawnEnemy(isBoss) {
 function spawnDrop(pos, guaranteed) {
     // Secondary weapon drop (rare, wave 2+)
     if (!guaranteed && !hasSecondaryWeapon && wave >= 2 && Math.random() < 0.04) {
-        const col = 0xffdd00;
-        let dMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(0.8, 0.3, 1.4),
-            new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 1.2 })
-        );
+        let dMesh = Toon.makeDrop('secondary');
         dMesh.position.set(pos.x, 0.8, pos.z);
         scene.add(dMesh);
         drops.push({ mesh: dMesh, type: 'secondary' });
@@ -923,12 +870,7 @@ function spawnDrop(pos, guaranteed) {
             acc += pWeights[i];
             if (roll < acc) { dType = pTypes[i]; break; }
         }
-        const pColors = { speed: 0xff00ff, shield: 0x0088ff, rapid: 0xff8800, overclock: 0xffffff };
-        const col = pColors[dType];
-        let dMesh = new THREE.Mesh(
-            new THREE.OctahedronGeometry(0.7),
-            new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 1 })
-        );
+        let dMesh = Toon.makeDrop(dType);
         dMesh.position.set(pos.x, 0.8, pos.z);
         scene.add(dMesh);
         drops.push({ mesh: dMesh, type: 'powerup', powerup: dType });
@@ -950,11 +892,7 @@ function spawnDrop(pos, guaranteed) {
         isH = Math.random() > 0.7;
     }
 
-    let col   = isH ? 0xff0000 : 0x00ffff;
-    let dMesh = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.6),
-        new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 1 })
-    );
+    let dMesh = Toon.makeDrop(isH ? 'hp' : 'ammo');
     dMesh.position.set(pos.x, 0.8, pos.z);
     scene.add(dMesh);
     drops.push({ mesh: dMesh, type: isH ? 'hp' : 'ammo' });
@@ -969,23 +907,23 @@ function drawMinimap() {
     ctx.clearRect(0, 0, W, H);
     ctx.save();
     ctx.beginPath(); ctx.arc(cx, cy, cx, 0, Math.PI * 2); ctx.clip();
-    ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#2a2a3a';
+    ctx.fillStyle = 'rgba(58,39,51,0.55)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,236,214,0.55)';
     for (let b of buildings) {
         let bx = cx + (b.minX + 2.5 - player.position.x) * scale;
         let by = cy + (b.minZ + 2.5 - player.position.z) * scale;
         let bw = (b.maxX - b.minX) * scale, bh = (b.maxZ - b.minZ) * scale;
         ctx.fillRect(bx - bw / 2, by - bh / 2, bw, bh);
     }
-    const pCol = { speed: '#ff00ff', shield: '#0088ff', rapid: '#ff8800', overclock: '#ffffff' };
+    const pCol = { speed: '#c6a2f0', shield: '#9fd0ff', rapid: '#ffb36b', overclock: '#fff4e2' };
     for (let d of drops) {
         let dx = cx + (d.mesh.position.x - player.position.x) * scale;
         let dy = cy + (d.mesh.position.z - player.position.z) * scale;
-        ctx.fillStyle = d.type === 'hp' ? '#ff4444' : d.type === 'ammo' ? '#00ffff'
-            : d.type === 'secondary' ? '#ffdd00' : (pCol[d.powerup] || '#fff');
+        ctx.fillStyle = d.type === 'hp' ? '#7fd6a4' : d.type === 'ammo' ? '#7cc3d6'
+            : d.type === 'secondary' ? '#ffc857' : (pCol[d.powerup] || '#fff');
         ctx.beginPath(); ctx.arc(dx, dy, 3, 0, Math.PI * 2); ctx.fill();
     }
-    ctx.fillStyle = '#ff8800';
+    ctx.fillStyle = '#ff4a2a';
     for (let eb of enemyBullets) {
         let ex = cx + (eb.mesh.position.x - player.position.x) * scale;
         let ey = cy + (eb.mesh.position.z - player.position.z) * scale;
@@ -994,52 +932,53 @@ function drawMinimap() {
     for (let e of enemies) {
         let ex = cx + (e.mesh.position.x - player.position.x) * scale;
         let ey = cy + (e.mesh.position.z - player.position.z) * scale;
-        ctx.fillStyle = e.isBoss ? '#ff4400' : ('#' + e.mesh.material.color.getHexString());
+        ctx.fillStyle = '#ff5a3c';
         ctx.beginPath(); ctx.arc(ex, ey, e.isBoss ? 7 : 4, 0, Math.PI * 2); ctx.fill();
     }
     if (boosts.shield && Date.now() < boosts.shield) {
-        ctx.strokeStyle = '#0088ff'; ctx.lineWidth = 2;
+        ctx.strokeStyle = '#9fd0ff'; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.save();
     ctx.translate(cx, cy); ctx.rotate(-yaw);
-    ctx.fillStyle = '#00ffff';
+    ctx.fillStyle = '#fff4e2';
     ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(-4, 5); ctx.lineTo(4, 5); ctx.closePath(); ctx.fill();
     ctx.restore();
     ctx.restore();
-    ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255,244,226,0.8)'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(cx, cy, cx - 1, 0, Math.PI * 2); ctx.stroke();
 }
 
 // ── HUD ──
 
+const _uiCache = {};
+function setText(id, v) {
+    if (_uiCache[id] === v) return;
+    _uiCache[id] = v;
+    const el = document.getElementById(id);
+    if (el) el.innerText = v;
+}
 function updateUI() {
     const hpVal = Math.max(0, Math.ceil(hp));
     const hpEl = document.getElementById('hp-val');
-    if (hpEl) hpEl.innerText = hpVal;
+    if (hpEl) setText('hp-val', hpVal);
 
     // Vitality bar & low-health warning
     const hpFill = document.getElementById('hp-fill');
     if (hpFill) {
         const pct = Math.max(0, Math.min(100, (hp / playerMaxHp) * 100));
         hpFill.style.width = pct + '%';
-        if (pct < 30) {
-            hpFill.style.background = 'linear-gradient(90deg, #ff0040, #ff4400)';
-            hpFill.style.boxShadow = '0 0 14px rgba(255, 0, 64, 0.7)';
-        } else {
-            hpFill.style.background = 'linear-gradient(90deg, #00ff66, #00f0ff)';
-            hpFill.style.boxShadow = '0 0 10px rgba(0, 255, 102, 0.4)';
-        }
+        hpFill.classList.toggle('low', pct < 30);
     }
     const opEl = document.getElementById('hud-op-name');
     if (opEl && selectedChar) {
-        opEl.innerText = selectedChar.toUpperCase();
+        setText('hud-op-name', selectedChar.toUpperCase());
     }
 
-    document.getElementById('ammo-val').innerText    = ammo;
-    document.getElementById('reserve-val').innerText = reserve;
-    document.getElementById('score-val').innerText   = score;
-    document.getElementById('enemies-left').innerText = enemies.length + enemiesToSpawn;
+    setText('ammo-val', ammo);
+    setText('reserve-val', reserve);
+    setText('score-val', score.toLocaleString());
+    setText('enemies-left', enemies.length + enemiesToSpawn);
     document.getElementById('reload-msg').style.display = (ammo <= 3 && reserve > 0) ? 'block' : 'none';
 
     // Combo display
@@ -1072,12 +1011,7 @@ function updateUI() {
     if (muzzleFlashAmount > 0) muzzleFlashAmount = Math.max(0, muzzleFlashAmount - 0.18);
 
     // Chromatic aberration
-    if (chromaAmount > 0) {
-        renderer.domElement.style.filter = `hue-rotate(${(chromaAmount * 40).toFixed(1)}deg) saturate(${(1 + chromaAmount).toFixed(2)})`;
-        chromaAmount = Math.max(0, chromaAmount - 0.07);
-    } else {
-        renderer.domElement.style.filter = '';
-    }
+    if (chromaAmount > 0) chromaAmount = Math.max(0, chromaAmount - 0.07);
 
     // Boost tags
     const now = Date.now();
@@ -1179,22 +1113,22 @@ function animate() {
         }
 
         if (!b.isRocket && (checkCollision(nextPos, 0.2) || b.dist > 150)) {
-            if (b.dist <= 150) createImpact(nextPos, 0x00ffff, 6);
+            if (b.dist <= 150) createImpact(nextPos, 0xd9b796, 6);
             disposeMesh(b.mesh); bullets.splice(i, 1); continue;
         }
 
         let hitEnemy = false;
         for (let e of enemies) {
             let r = e.size / 2 + 0.4;
+            const topY = e.mesh.position.y + e.size * 0.9 + 0.35;
             if (nextPos.x > e.mesh.position.x - r && nextPos.x < e.mesh.position.x + r &&
-                nextPos.z > e.mesh.position.z - r && nextPos.z < e.mesh.position.z + r) {
-                e.hp -= b.dmg || bulletDmg;
+                nextPos.z > e.mesh.position.z - r && nextPos.z < e.mesh.position.z + r &&
+                nextPos.y < topY) {
+                const base = b.dmg || bulletDmg;
+                e.hp -= b.isRocket ? base : Juice.onHit(e, nextPos, b.dir, base);
                 e.hitFlash = 1.0;
                 hitEnemy = true;
                 shotsHit++;
-                triggerHitMarker(false);
-                if (typeof Sound !== 'undefined' && Sound.enemyHit) Sound.enemyHit();
-                if (!b.isRocket) createImpact(nextPos, 0xff0040, 12);
                 break;
             }
         }
@@ -1208,7 +1142,7 @@ function animate() {
         let eb = enemyBullets[i];
         let nextPos = eb.mesh.position.clone().add(eb.dir.clone().multiplyScalar(eb.speed));
         if (checkCollision(nextPos, 0.15) || eb.dist > eb.range) {
-            if (eb.dist <= eb.range) createImpact(nextPos, 0x00ff66, 4);
+            if (eb.dist <= eb.range) createImpact(nextPos, 0xd9b796, 4);
             disposeMesh(eb.mesh); enemyBullets.splice(i, 1); continue;
         }
         let blocked = false;
@@ -1220,7 +1154,7 @@ function animate() {
                 let r = e.size / 2 + 0.4;
                 if (probe2.x > e.mesh.position.x - r && probe2.x < e.mesh.position.x + r &&
                     probe2.z > e.mesh.position.z - r && probe2.z < e.mesh.position.z + r) {
-                    createImpact(probe2, 0x00ff66, 4); blocked = true; break outer;
+                    createImpact(probe2, 0xd9b796, 4); blocked = true; break outer;
                 }
             }
         }
@@ -1235,9 +1169,9 @@ function animate() {
                     waveDamageTaken += dmg;
                 }
                 damageFlashAmount = 0.7; shakeAmount = 0.18; chromaAmount = 1.0;
-                Sound.hit(); createImpact(player.position, 0xff0000, 6);
+                Juice.onPlayerHit();
             } else {
-                createImpact(player.position, 0x0088ff, 8);
+                createImpact(player.position.clone().add(new THREE.Vector3(-Math.sin(yaw) * 1.2, -0.3, -Math.cos(yaw) * 1.2)), 0x9fd0ff, 8);
             }
             disposeMesh(eb.mesh); enemyBullets.splice(i, 1); continue;
         }
@@ -1268,47 +1202,19 @@ function animate() {
         }
 
         if (e.hp <= 0) {
-            Sound.explode();
-
-            // Scoring with combo
-            const pts = e.isBoss ? 500 * wave : 50;
-            const actualPts = pts * comboMultiplier;
-            score += actualPts;
+            // Scoring, combo, streak callouts, confetti, kill pop — see js/juice.js
+            const actualPts = Juice.onKill(e);
 
             // Kill tracking
             killCount++;
             totalEnemiesKilled++;
             localStorage.setItem('msc_total_kills', totalEnemiesKilled);
 
-            // Floating score popup
-            showFloatingFeedback(`+${actualPts}`, 'score');
-
-            // Combo system
-            if (comboDecayTimer) clearTimeout(comboDecayTimer);
-            comboCount++;
-            if (comboCount >= 7)      comboMultiplier = 4;
-            else if (comboCount >= 4) comboMultiplier = 3;
-            else if (comboCount >= 2) comboMultiplier = 2;
-            else                      comboMultiplier = 1;
-
-            if (comboMultiplier > 1) {
-                showFloatingFeedback(`COMBO ×${comboMultiplier}!`, 'clean');
-            }
-
-            comboDecayTimer = setTimeout(() => {
-                comboCount = 0; comboMultiplier = 1;
-            }, 2200);
-
-            if (typeof Sound !== 'undefined' && Sound.kill) Sound.kill(comboMultiplier);
-
             checkAchievements();
 
             // Kill feed
             const feedName = e.isBoss ? 'OVERLORD' : (e.name || 'ENEMY');
-            const feedCol  = e.isBoss ? '#ff4400' : (e.colorHex || '#ffffff');
-            addKillFeedEntry(`+${actualPts} ${feedName}${comboMultiplier > 1 ? ' ×' + comboMultiplier : ''}`, feedCol);
-
-            createImpact(e.mesh.position, e.mesh.material.color.getHex(), e.isBoss ? 50 : 20);
+            addKillFeedEntry(`${e._headKill ? '◎ ' : ''}${feedName} <b>+${actualPts}</b>${comboMultiplier > 1 ? ' <i>x' + comboMultiplier + '</i>' : ''}`, '#fff4e2');
 
             // Drops
             if (e.isBoss) {
@@ -1323,7 +1229,7 @@ function animate() {
                 banner.innerText = '// OVERLORD ELIMINATED //';
                 banner.style.opacity = '1';
                 setTimeout(() => { banner.style.opacity = '0'; }, 3000);
-            } else if (Math.random() > 0.5) {
+            } else if (Math.random() < Juice.dropChance()) {
                 spawnDrop(e.mesh.position);
             }
 
@@ -1408,10 +1314,7 @@ function animate() {
                 e.lastEnemyShot = Date.now();
                 const burstSpreads = e.bossPhase === 1 ? [0] : e.bossPhase === 2 ? [-0.2, 0, 0.2] : [-0.3, -0.15, 0, 0.15, 0.3];
                 for (let sp of burstSpreads) {
-                    const eBullet = new THREE.Mesh(
-                        new THREE.SphereGeometry(0.18, 6, 6),
-                        new THREE.MeshBasicMaterial({ color: 0xff4400 })
-                    );
+                    const eBullet = Toon.makeEnemyBullet(true);
                     eBullet.position.copy(e.mesh.position);
                     eBullet.position.y = e.mesh.position.y + 1.5; // eye-level (boss center is at 3.6)
                     const eDir = player.position.clone().sub(eBullet.position).normalize();
@@ -1457,10 +1360,7 @@ function animate() {
             }
             if (distToPlayer <= e.bulletRange && Date.now() - e.lastEnemyShot > e.shootInterval && !losBlocked) {
                 e.lastEnemyShot = Date.now();
-                let eBullet = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.12, 6, 6),
-                    new THREE.MeshBasicMaterial({ color: 0x00ff66 })
-                );
+                let eBullet = Toon.makeEnemyBullet(false);
                 eBullet.position.copy(e.mesh.position);
                 eBullet.position.y = e.mesh.position.y + e.size * 0.4;
                 let eDir = player.position.clone().sub(eBullet.position).normalize();
@@ -1497,14 +1397,19 @@ function animate() {
         }
     }
 
-    if (enemies.length === 0 && enemiesToSpawn === 0 && !isWaveTransition) startWave(wave + 1);
+    if (enemies.length === 0 && enemiesToSpawn === 0 && !isWaveTransition) Juice.onWaveCleared();
 
     // Drops
     for (let i = drops.length - 1; i >= 0; i--) {
         let d = drops[i];
         d.mesh.rotation.y += 0.08;
         d.mesh.position.y = 0.8 + Math.sin(nowMs * 0.005) * 0.2;
-        if (player.position.distanceTo(d.mesh.position) < 2.0) {
+        const dd = player.position.distanceTo(d.mesh.position);
+        if (dd < Juice.pickupRadius() * 2.5 && dd > 1.0) {      // gentle pull towards the player
+            d.mesh.position.x += (player.position.x - d.mesh.position.x) * 0.04;
+            d.mesh.position.z += (player.position.z - d.mesh.position.z) * 0.04;
+        }
+        if (dd < Juice.pickupRadius()) {
             Sound.pickup();
             const healAmt = selectedChar === 'medic' ? 50 : 25;
             if      (d.type === 'hp')        hp = Math.min(playerMaxHp, hp + healAmt);
@@ -1516,6 +1421,7 @@ function animate() {
         }
     }
 
+    Juice.update();
     updateUI();
     drawMinimap();
     renderer.render(scene, camera);
@@ -1527,60 +1433,30 @@ function triggerGameOver() {
     gameRunning = false;
 
     // High score
-    if (score > highScore) {
+    const prevBest = highScore;
+    const isBest = score > highScore;
+    if (isBest) {
         highScore = score;
         localStorage.setItem('msc_highscore', highScore);
     }
 
-    // XP calculation
-    const xpEarned = Math.floor(score / 8) + killCount * 2 + (wave - 1) * 40;
+    // XP calculation (same formula as before, plus a streak bonus)
+    const xpEarned = Math.max(0, Math.floor(score / 8) + killCount * 2 + (wave - 1) * 40 + (Juice.run.bestStreak || 0) * 5);
+    const oldXP    = playerXP;
     const oldRank  = getPlayerRank(playerXP);
     playerXP      += xpEarned;
     localStorage.setItem('msc_xp', playerXP);
     const newRank  = getPlayerRank(playerXP);
-    const rankedUp = newRank.name !== oldRank.name;
+    if (newRank.name !== oldRank.name) Sound.rankUp();
 
-    // Survival time
     const survSecs = Math.floor((Date.now() - runStartTime) / 1000);
-    const mins = Math.floor(survSecs / 60), secs = survSecs % 60;
-    const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
-
-    // Accuracy
+    const timeStr = `${Math.floor(survSecs / 60)}:${(survSecs % 60).toString().padStart(2, '0')}`;
     const acc = shotsFired > 0 ? Math.round(shotsHit / shotsFired * 100) : 0;
 
-    // Rank progress
-    const nextR = getNextRank(playerXP);
-    const rankBar = nextR
-        ? `<div class="stat-bar-row"><span>${newRank.name}</span><div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.min(100,(playerXP-newRank.xp)/(nextR.xp-newRank.xp)*100).toFixed(1)}%"></div></div><span>${nextR.name}</span></div>`
-        : `<div style="color:#ffff00;font-size:11px;letter-spacing:2px">MAX RANK ACHIEVED</div>`;
-
-    const rankUpBadge = rankedUp
-        ? `<div id="rank-up-badge">&#9650; RANK UP: ${newRank.name}</div>`
-        : '';
-
-    document.getElementById('gameover').style.display = 'flex';
-    document.getElementById('gameover').innerHTML = `
-        <div class="scanlines-overlay"></div>
-        <div id="go-inner">
-            <h1 style="color:#ff3040;letter-spacing:4px;text-shadow:0 0 30px #ff0040;">SIGNAL TERMINATED</h1>
-            ${rankUpBadge}
-            <div class="go-stats-grid">
-                <div class="go-stat"><span class="go-stat-label">SCORE</span><span class="go-stat-val" style="color:#fff">${score}</span></div>
-                <div class="go-stat"><span class="go-stat-label">BEST</span><span class="go-stat-val" style="color:#ffff00">${highScore}</span></div>
-                <div class="go-stat"><span class="go-stat-label">WAVES</span><span class="go-stat-val" style="color:#00ffff">${wave}</span></div>
-                <div class="go-stat"><span class="go-stat-label">KILLS</span><span class="go-stat-val" style="color:#ff4466">${killCount}</span></div>
-                <div class="go-stat"><span class="go-stat-label">ACCURACY</span><span class="go-stat-val" style="color:#ff8800">${acc}%</span></div>
-                <div class="go-stat"><span class="go-stat-label">SURVIVED</span><span class="go-stat-val" style="color:#aa00ff">${timeStr}</span></div>
-            </div>
-            <div class="go-xp-row">+${xpEarned} XP &nbsp;·&nbsp; ${newRank.name}</div>
-            ${rankBar}
-            <button onclick="location.reload()">REBOOT</button>
-        </div>
-    `;
-
-    if (rankedUp) Sound.rankUp();
-
-    // Update menu rank display (in case they go back somehow)
+    Juice.showGameOver({
+        score, best: highScore, prevBest, isBest, wave, kills: killCount, acc, time: timeStr,
+        xp: xpEarned, oldXP, newXP: playerXP, rank: newRank.name
+    });
     updateMenuRankDisplay();
 }
 
@@ -1608,6 +1484,7 @@ function startGame() {
     runStartTime = Date.now();
 
     document.getElementById('menu').style.display = 'none';
+    Juice.onRunStart();
     beginGame();
 }
 
@@ -1720,6 +1597,7 @@ function togglePause() {
     gamePaused = !gamePaused;
     if (gamePaused) {
         document.exitPointerLock();
+        Juice.onPause(true);
         document.getElementById('pause-menu').style.display = 'flex';
     } else {
         resumeGame();
@@ -1728,6 +1606,7 @@ function togglePause() {
 
 function resumeGame() {
     gamePaused = false;
+    Juice.onPause(false);
     document.getElementById('pause-menu').style.display = 'none';
     if (!isMobile) document.body.requestPointerLock();
     // Only restart the loop if it was fully stopped (not just paused)
@@ -1740,8 +1619,9 @@ function exitToMenu() {
 }
 
 document.addEventListener('pointerlockchange', () => {
-    if (!document.pointerLockElement && gameRunning && !gamePaused) {
+    if (!document.pointerLockElement && gameRunning && !gamePaused && !Juice.picking) {
         gamePaused = true;
+        Juice.onPause(true);
         document.getElementById('pause-menu').style.display = 'flex';
     }
 });
@@ -1755,7 +1635,7 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-document.getElementById('menu-hs').innerText = highScore;
+document.getElementById('menu-hs').innerText = highScore.toLocaleString();
 
 // Init rank display on menu
 updateMenuRankDisplay();

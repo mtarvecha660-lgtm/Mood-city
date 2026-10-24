@@ -6,16 +6,44 @@ A browser-based first-person shooter built with vanilla HTML, CSS, and JavaScrip
 
 ---
 
+## What's new: Golden Hour update
+
+A visual + game-feel overhaul (branch `tab-upgrade`).
+
+**Look: "Golden Hour Toon"**: warm sand/peach city, toon shading with ink outlines, dusty-rose → deep-teal sky with a flat sun, soft long shadows. Enemies are the only thing in hot coral, as chunky little characters with eyes, and they burst into paper confetti. The UI is rounded and minimal with cream text and a thin crosshair. There's also a gun viewmodel with recoil, muzzle flash, and a reload dip.
+
+**Feel**
+- Hold to fire (mouse button or the FIRE button on mobile)
+- Headshots (x2 damage) with gold damage numbers and a ding
+- Callouts: DOUBLE KILL, TRIPLE, RAMPAGE, STREAK x5/x10, GODLIKE, HEADSHOT, BOSS DOWN, NEW HIGH SCORE
+- Combo multiplier up to x8 with a visible timer bar
+- Layered WebAudio sounds: per-operative gunshots, hit tick, kill pop that rises in pitch along a chain, wave stingers, low-HP heartbeat, ambient bed. Mute with `M` or the 🔊 button.
+
+**Progression**
+- After every wave, pick 1 of 3 perks (damage, fire rate, magazine, max HP, speed, magnet, deadeye, vampire, twin shot…). Keys 1/2/3 or tap.
+- Levels from XP unlock gun skins (Mint, Tide, Golden Hour, Lilac, Midnight) and extra perks (Vampire, Lucky, Twin Shot)
+- The run-over screen shows the score count-up, best streak, XP bar with level-ups, and "X XP to unlock…" / "only N short of your best". **PLAY AGAIN** restarts instantly (Space/Enter on desktop).
+
+**Mobile**: the minimap moved off the joystick, and the AI buttons no longer cover FIRE. The fire button is bigger and supports hold. The menu fits landscape phones.
+
+**Performance**: 28 per-building point lights are replaced by one sun + sky light. Particles are now a single instanced draw call, and tracers/geometry are shared instead of allocated per shot.
+
+New files: `js/toon.js` (art direction, enemies, FX, gun), `js/juice.js` (feel, progression, audio), `css/golden.css` (UI theme), `test/smoke.test.mjs` (`npm test`).
+
+---
+
 ## Controls
 
 | Input | Action |
 |-------|--------|
 | `W A S D` | Move |
 | Mouse | Aim |
-| Left Click | Shoot |
+| Left Click (hold) | Shoot |
 | `R` | Reload |
 | `F` | Fire rocket (when you have one) |
 | `ESC` | Pause / Resume |
+| `M` | Mute / unmute |
+| `1` `2` `3` | Pick a perk between waves |
 
 **On mobile:** left thumb joystick to move, right thumb drag to aim, on-screen buttons to shoot, reload, and fire rockets. Rotate your device to landscape to play.
 

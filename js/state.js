@@ -23,6 +23,7 @@ let hasSecondaryWeapon = false, secondaryAmmo = 0;
 // Wave system
 let wave = 0, enemiesToSpawn = 0, isWaveTransition = false;
 let gamePaused = false;
+let runGen = 0;   // bumps on every in-place restart so stale wave timers die
 let tutorialMode = false;
 
 // Boss
