@@ -348,6 +348,10 @@ const Toon = (() => {
                 root.add(leg);
             }
         }
+        // Yaw-first Euler order: lookAt() then decomposes to a pure Y turn, so the
+        // waddle that animateEnemy writes into rotation.z can never inherit an
+        // x = PI flip (the cause of enemies standing on their heads when facing away).
+        root.rotation.order = 'YXZ';
         root.userData.kind = kind;
         root.userData.headY = headY;
         root.userData.headR = headR;
@@ -482,27 +486,112 @@ const Toon = (() => {
 
     // ── Gun viewmodel ──
     let gun = null, gunAccentMat = null, gunKick = 0, gunFlashT = 0;
+    // Each operative carries its own gun silhouette (same parts kit, different
+    // proportions) so picking an operative visibly changes what you hold.
+    function addGunParts(g, op, accentM) {
+        const bodyM = toonMat(0x6a5560), darkM = toonMat(0x3a2b33), railM = toonMat(0xf3e6d6);
+        const add = (gm, m, x, y, z, o) => { const me = new THREE.Mesh(gm, m); me.position.set(x, y, z); if (o) outline(me, o); g.add(me); return me; };
+        let muzzleZ = -0.52;
+        if (op === 'enforcer') {            // pump shotgun: chunky body, twin barrels, wooden-ish pump
+            add(new THREE.BoxGeometry(0.15, 0.15, 0.5), bodyM, 0, 0, 0, 1.06);
+            add(new THREE.CylinderGeometry(0.034, 0.034, 0.42, 10).rotateX(Math.PI / 2), darkM, -0.035, 0.03, -0.42);
+            add(new THREE.CylinderGeometry(0.034, 0.034, 0.42, 10).rotateX(Math.PI / 2), darkM, 0.035, 0.03, -0.42);
+            add(new THREE.BoxGeometry(0.13, 0.07, 0.18), accentM, 0, -0.045, -0.36, 1.08);
+            add(new THREE.BoxGeometry(0.1, 0.2, 0.11), darkM, 0, -0.15, 0.13).rotation.x = -0.3;
+            add(new THREE.BoxGeometry(0.16, 0.035, 0.32), accentM, 0, 0.09, 0.02);
+            muzzleZ = -0.66;
+        } else if (op === 'phantom') {      // SMG: slim body, long curved mag, stubby barrel, stock
+            add(new THREE.BoxGeometry(0.1, 0.12, 0.4), bodyM, 0, 0, 0, 1.06);
+            add(new THREE.CylinderGeometry(0.025, 0.025, 0.18, 10).rotateX(Math.PI / 2), darkM, 0, 0.015, -0.28);
+            add(new THREE.BoxGeometry(0.06, 0.26, 0.08), accentM, 0, -0.17, -0.06).rotation.x = 0.25;
+            add(new THREE.BoxGeometry(0.08, 0.17, 0.09), darkM, 0, -0.12, 0.12).rotation.x = -0.2;
+            add(new THREE.BoxGeometry(0.05, 0.06, 0.22), railM, 0, 0, 0.28);
+            add(new THREE.BoxGeometry(0.11, 0.03, 0.26), accentM, 0, 0.07, -0.02);
+            muzzleZ = -0.4;
+        } else if (op === 'medic') {        // compact sidearm with a cream cross badge
+            add(new THREE.BoxGeometry(0.11, 0.13, 0.34), bodyM, 0, 0, 0, 1.06);
+            add(new THREE.CylinderGeometry(0.028, 0.028, 0.14, 10).rotateX(Math.PI / 2), darkM, 0, 0.015, -0.23);
+            add(new THREE.BoxGeometry(0.09, 0.2, 0.1), darkM, 0, -0.14, 0.08).rotation.x = -0.25;
+            add(new THREE.BoxGeometry(0.125, 0.045, 0.24), accentM, 0, 0.078, -0.01);
+            add(new THREE.BoxGeometry(0.02, 0.09, 0.03), railM, 0.066, 0, -0.04);
+            add(new THREE.BoxGeometry(0.02, 0.03, 0.09), railM, 0.066, 0, -0.04);
+            muzzleZ = -0.34;
+        } else {                            // striker: the balanced rifle-pistol
+            add(new THREE.BoxGeometry(0.12, 0.13, 0.46), bodyM, 0, 0, 0, 1.06);
+            add(new THREE.BoxGeometry(0.135, 0.04, 0.3), accentM, 0, 0.075, -0.02);
+            add(new THREE.CylinderGeometry(0.03, 0.03, 0.26, 10).rotateX(Math.PI / 2), darkM, 0, 0.015, -0.34);
+            add(new THREE.BoxGeometry(0.09, 0.2, 0.1), darkM, 0, -0.14, 0.12).rotation.x = -0.25;
+            add(new THREE.BoxGeometry(0.07, 0.16, 0.08), accentM, 0, -0.13, -0.08);
+            add(new THREE.BoxGeometry(0.04, 0.05, 0.04), railM, 0, 0.1, 0.16);
+            add(new THREE.BoxGeometry(0.125, 0.03, 0.2), railM, 0, -0.05, -0.12);
+        }
+        return muzzleZ;
+    }
     function buildGun() {
         gun = new THREE.Group();
-        const bodyM = toonMat(0x6a5560), darkM = toonMat(0x3a2b33), railM = toonMat(0xf3e6d6);
         gunAccentMat = new THREE.MeshToonMaterial({ color: tracerColor, gradientMap: getRamp() });
-        const add = (g, m, x, y, z, o) => { const me = new THREE.Mesh(g, m); me.position.set(x, y, z); if (o) outline(me, o); gun.add(me); return me; };
-        add(new THREE.BoxGeometry(0.12, 0.13, 0.46), bodyM, 0, 0, 0, 1.06);
-        add(new THREE.BoxGeometry(0.135, 0.04, 0.3), gunAccentMat, 0, 0.075, -0.02);
-        add(new THREE.CylinderGeometry(0.03, 0.03, 0.26, 10).rotateX(Math.PI / 2), darkM, 0, 0.015, -0.34);
-        add(new THREE.BoxGeometry(0.09, 0.2, 0.1), darkM, 0, -0.14, 0.12).rotation.x = -0.25;
-        add(new THREE.BoxGeometry(0.07, 0.16, 0.08), gunAccentMat, 0, -0.13, -0.08);
-        add(new THREE.BoxGeometry(0.04, 0.05, 0.04), railM, 0, 0.1, 0.16);
-        add(new THREE.BoxGeometry(0.125, 0.03, 0.2), railM, 0, -0.05, -0.12);
+        const op = (typeof selectedChar !== 'undefined' && selectedChar) || 'striker';
+        const muzzleZ = addGunParts(gun, op, gunAccentMat);
         gun.children.forEach(c => { c.renderOrder = 5; });
         flashMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.42), new THREE.MeshBasicMaterial({ map: getFlashTex(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
-        flashMesh.position.set(0, 0.015, -0.52);
+        flashMesh.position.set(0, 0.015, muzzleZ);
         flashMesh.visible = false;
         gun.add(flashMesh);
         gun.scale.setScalar(0.5);
         gun.position.set(0.19, -0.18, -0.42);
         camera.add(gun);
         scene.add(camera);
+    }
+
+    // Codex preview figure for an operative: a friendly cream toon character in
+    // the operative's colour, holding that operative's gun.
+    const OP_COLORS = { striker: 0x7cc3d6, enforcer: 0xc6a2f0, phantom: 0xffc857, medic: 0x7fd6a4 };
+    function makeOperative(op) {
+        const col = OP_COLORS[op] || 0x7cc3d6;
+        const bulk = op === 'enforcer' ? 1.25 : op === 'phantom' ? 0.88 : 1;
+        const root = new THREE.Group();
+        const suit = toonMat(col), cream = toonMat(PAL.cream), ink = toonMat(PAL.ink);
+        const body = new THREE.Mesh(geo('opBody' + bulk, () => new THREE.CylinderGeometry(0.36 * bulk, 0.42 * bulk, 0.9, 14)), suit);
+        body.position.y = 0.75; outline(body, 1.08); root.add(body);
+        const belt = new THREE.Mesh(geo('opBelt' + bulk, () => new THREE.CylinderGeometry(0.425 * bulk, 0.425 * bulk, 0.1, 14)), ink);
+        belt.position.y = 0.42; root.add(belt);
+        const head = new THREE.Mesh(geo('opHead', () => new THREE.SphereGeometry(0.3, 18, 14)), cream);
+        head.position.y = 1.45; outline(head, 1.08); root.add(head);
+        const visor = new THREE.Mesh(geo('opVisor', () => new THREE.BoxGeometry(0.46, 0.13, 0.2)), ink);
+        visor.position.set(0, 1.48, 0.21); root.add(visor);
+        const shine = new THREE.Mesh(geo('opShine', () => new THREE.BoxGeometry(0.1, 0.035, 0.02)), basicMat(col));
+        shine.position.set(-0.1, 1.5, 0.315); root.add(shine);
+        if (op === 'medic') {
+            const c1 = new THREE.Mesh(geo('opX1', () => new THREE.BoxGeometry(0.22, 0.07, 0.04)), cream);
+            const c2 = new THREE.Mesh(geo('opX2', () => new THREE.BoxGeometry(0.07, 0.22, 0.04)), cream);
+            c1.position.set(0, 0.85, 0.42); c2.position.set(0, 0.85, 0.42); root.add(c1, c2);
+        }
+        if (op === 'enforcer') {
+            for (const sx of [-1, 1]) {
+                const pad = new THREE.Mesh(geo('opPad', () => new THREE.BoxGeometry(0.28, 0.2, 0.42)), cream);
+                pad.position.set(sx * 0.5, 1.12, 0); outline(pad, 1.1); root.add(pad);
+            }
+        }
+        if (op === 'phantom') {
+            const hood = new THREE.Mesh(geo('opHood', () => new THREE.ConeGeometry(0.34, 0.36, 14)), suit);
+            hood.position.y = 1.78; outline(hood, 1.08); root.add(hood);
+        }
+        if (op === 'striker') {
+            const ant = new THREE.Mesh(geo('opAnt', () => new THREE.CylinderGeometry(0.02, 0.02, 0.3, 5)), ink);
+            ant.position.set(0.18, 1.8, -0.05); root.add(ant);
+        }
+        for (const lx of [-0.15, 0.15]) {
+            const leg = new THREE.Mesh(geo('opLeg', () => new THREE.BoxGeometry(0.17, 0.32, 0.22)), ink);
+            leg.position.set(lx * bulk, 0.16, 0); root.add(leg);
+        }
+        const g = new THREE.Group();
+        addGunParts(g, op, toonMat(col));
+        g.scale.setScalar(1.15);
+        g.rotation.y = Math.PI;            // muzzle toward the viewer like the figure
+        g.position.set(0.32 * bulk, 0.82, 0.38);
+        root.add(g);
+        root.userData.op = op;
+        return root;
     }
     function setGunSkin(c) { tracerColor = c; if (gunAccentMat) gunAccentMat.color.set(c); }
     function gunFire(power = 1) {
@@ -569,5 +658,5 @@ const Toon = (() => {
         for (const e of enemies) animateEnemy(e, nowMs);
     }
 
-    return { PAL, buildWorld, makeEnemy, isHeadshot, makeBullet, makeEnemyBullet, makeRocket, makeDrop, burst, ringPop, gunFire, setGunSkin, setTracerColor, update, toonMat };
+    return { PAL, OP_COLORS, buildWorld, makeEnemy, makeOperative, isHeadshot, makeBullet, makeEnemyBullet, makeRocket, makeDrop, burst, ringPop, gunFire, setGunSkin, setTracerColor, update, toonMat };
 })();

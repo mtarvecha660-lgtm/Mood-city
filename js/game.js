@@ -223,88 +223,97 @@ const CODEX_DATA = {
     ]
 };
 
-// ── CODEX preview renderer ──
+// ── CODEX preview renderer (Golden Hour Toon) ──
+// Operatives, threats and drops are shown with the same toon models the game
+// uses (Toon.makeOperative / makeEnemy / makeDrop) on a warm sand pedestal.
+// Palette per operative; every threat is coral, like in the game.
+const CODEX_HEX = { striker: '#7cc3d6', enforcer: '#c6a2f0', phantom: '#ffc857', medic: '#7fd6a4',
+    hp: '#7fd6a4', ammo: '#7cc3d6', speed: '#c6a2f0', shield: '#9fd0ff', rapid: '#ffb36b', overclock: '#fff4e2', secondary: '#ffc857' };
+Object.keys(CODEX_DATA).forEach(tab => CODEX_DATA[tab].forEach(item => {
+    item.hex = tab === 'threats' ? '#ff5a3c' : (CODEX_HEX[item.id] || '#fff4e2');
+    item.color = parseInt(item.hex.slice(1), 16);
+}));
+const THREAT_KIND = { runner: ['runner', 1.2], scout: ['scout', 0.8], tank: ['tank', 2.2], sniper: ['sniper', 1.0], bomber: ['bomber', 1.3], overlord: ['boss', 2.6] };
+
 let previewRenderer = null, previewScene = null, previewCamera = null;
-let previewMesh = null, previewLight = null, previewAnimId = null;
+let previewMesh = null, previewAnimId = null, previewPedestal = null;
 
 function initPreviewRenderer() {
-    if (previewRenderer) return;
+    if (previewRenderer) { sizePreview(); return; }
     const canvas = document.getElementById('preview-canvas');
     previewRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-    previewRenderer.setSize(220, 220);
+    previewRenderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     previewRenderer.setClearColor(0x000000, 0);
     previewScene  = new THREE.Scene();
-    previewCamera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-    previewScene.add(new THREE.AmbientLight(0xffffff, 0.2));
-    previewLight = new THREE.PointLight(0x00ffff, 4, 40);
-    previewLight.position.set(3, 6, 4);
-    previewScene.add(previewLight);
-    const fill = new THREE.PointLight(0xffffff, 1.2, 40);
-    fill.position.set(-4, 1, -3);
-    previewScene.add(fill);
-    const grid = new THREE.GridHelper(10, 10, 0x111111, 0x0a0a0a);
-    previewScene.add(grid);
+    previewCamera = new THREE.PerspectiveCamera(32, 1, 0.1, 200);
+    previewScene.add(new THREE.HemisphereLight(0xfff1d6, 0x8a5a66, 0.75));
+    const sunL = new THREE.DirectionalLight(0xffe2bf, 0.9);
+    sunL.position.set(4, 7, 6);
+    previewScene.add(sunL);
+    previewPedestal = new THREE.Group();
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(1, 1.06, 0.14, 40), Toon.toonMat(0xd8a47f));
+    disc.position.y = -0.07;
+    const rim = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.14, 0.1, 40), Toon.toonMat(0x3a2733));
+    rim.position.y = -0.1;
+    previewPedestal.add(rim, disc);
+    previewScene.add(previewPedestal);
+    sizePreview();
 }
+
+function sizePreview() {
+    if (!previewRenderer) return;
+    const area = document.getElementById('codex-preview-area');
+    const w = Math.max(120, area.clientWidth - 8), h = Math.max(120, area.clientHeight - 30);
+    previewRenderer.setSize(w, h, false);   // CSS sizes the canvas; this sets the drawing buffer
+    previewCamera.aspect = w / h;
+    previewCamera.updateProjectionMatrix();
+    if (previewMesh) framePreview();
+}
+window.addEventListener('resize', () => { if (document.getElementById('codex').style.display !== 'none') sizePreview(); });
 
 function clearPreviewMesh() {
-    if (previewMesh) {
-        previewScene.remove(previewMesh);
-        previewMesh.geometry.dispose();
-        previewMesh.material.dispose();
-        previewMesh = null;
-    }
+    if (!previewMesh) return;
+    previewScene.remove(previewMesh);
+    previewMesh.traverse(o => {
+        if (o.material && !(o.material.userData && o.material.userData.shared)) o.material.dispose();
+    });
+    previewMesh = null;
 }
 
-function setPreviewMesh(color, w, h, d) {
-    clearPreviewMesh();
-    const geo = new THREE.BoxGeometry(w, h, d);
-    const mat = new THREE.MeshStandardMaterial({
-        color, emissive: color, emissiveIntensity: 0.35,
-        roughness: 0.55, metalness: 0.5
-    });
-    previewMesh = new THREE.Mesh(geo, mat);
-    previewMesh.position.y = h / 2;
-    previewMesh.userData.baseY = h / 2;
-    const edges = new THREE.EdgesGeometry(geo);
-    const line  = new THREE.LineSegments(edges,
-        new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18 })
-    );
-    previewMesh.add(line);
-    previewScene.add(previewMesh);
-    if (previewLight) previewLight.color.setHex(color);
-    const dist = Math.max(h, w) * 2.4 + 1.5;
-    previewCamera.position.set(0, h * 0.55, dist);
-    previewCamera.lookAt(0, h * 0.3, 0);
+function framePreview() {
+    const box = new THREE.Box3().setFromObject(previewMesh);
+    const size = box.getSize(new THREE.Vector3());
+    const r = Math.max(size.y, size.x * 1.1, 0.8);
+    previewPedestal.scale.setScalar(Math.max(0.6, Math.max(size.x, size.z) * 0.75));
+    const fit = r / (2 * Math.tan(THREE.MathUtils.degToRad(previewCamera.fov / 2)));
+    const dist = fit * 1.35 / Math.min(1, previewCamera.aspect) + 0.6;
+    const cy = size.y * 0.5;
+    previewCamera.position.set(0, cy + r * 0.28, dist);
+    previewCamera.lookAt(0, cy, 0);
 }
 
-function setPreviewSphere(color, radius) {
+function setPreviewModel(tab, item) {
     clearPreviewMesh();
-    const geo = new THREE.OctahedronGeometry(radius);
-    const mat = new THREE.MeshStandardMaterial({
-        color, emissive: color, emissiveIntensity: 0.6,
-        roughness: 0.25, metalness: 0.7
-    });
-    previewMesh = new THREE.Mesh(geo, mat);
-    previewMesh.position.y = radius + 0.4;
-    previewMesh.userData.baseY = radius + 0.4;
-    const edges = new THREE.EdgesGeometry(geo);
-    const line  = new THREE.LineSegments(edges,
-        new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.12 })
-    );
-    previewMesh.add(line);
+    let m;
+    if (tab === 'operatives') m = Toon.makeOperative(item.id);
+    else if (tab === 'threats') {
+        const [kind, sz] = THREAT_KIND[item.id] || ['runner', 1.2];
+        m = Toon.makeEnemy(kind, sz);
+    } else m = Toon.makeDrop(item.id);
+    const holder = new THREE.Group();
+    holder.add(m);
+    // sit the model on the pedestal
+    const box = new THREE.Box3().setFromObject(m);
+    m.position.y -= box.min.y;
+    previewMesh = holder;
+    previewMesh.rotation.y = -0.5;
     previewScene.add(previewMesh);
-    if (previewLight) previewLight.color.setHex(color);
-    previewCamera.position.set(0, radius * 2.5, radius * 6);
-    previewCamera.lookAt(0, radius + 0.4, 0);
+    framePreview();
 }
 
 function animatePreview() {
     previewAnimId = requestAnimationFrame(animatePreview);
-    if (previewMesh) {
-        previewMesh.rotation.y += 0.012;
-        previewMesh.position.y = (previewMesh.userData.baseY || 0)
-            + Math.sin(Date.now() * 0.0016) * 0.06;
-    }
+    if (previewMesh) previewMesh.rotation.y += 0.01;
     if (previewRenderer && previewScene && previewCamera)
         previewRenderer.render(previewScene, previewCamera);
 }
@@ -313,6 +322,7 @@ function animatePreview() {
 
 function openCodex(tab) {
     document.getElementById('menu').style.display  = 'none';
+    const aiB = document.getElementById('ai-btn'); if (aiB) aiB.style.display = 'none';
     document.getElementById('codex').style.display = 'flex';
     initPreviewRenderer();
     if (!previewAnimId) animatePreview();
@@ -338,9 +348,9 @@ function switchCodexTab(tab) {
         if (tab === 'operatives' && item.id === selectedChar) div.classList.add('selected-operative');
         div.onclick = () => showCodexEntry(tab, item.id);
         div.innerHTML = `
-            <div class="item-dot" style="background:${item.hex};box-shadow:0 0 7px ${item.hex};"></div>
+            <div class="item-dot" style="background:${item.hex};"></div>
             <div class="item-labels">
-                <span class="item-name" style="color:${item.hex};">${item.name}</span>
+                <span class="item-name">${item.name}</span>
                 <span class="item-tag">${item.tag}</span>
             </div>
             ${tab === 'operatives' && item.id === selectedChar
@@ -357,44 +367,40 @@ function showCodexEntry(tab, id) {
     document.querySelectorAll('.codex-item').forEach(el => el.classList.remove('active'));
     const sideEl = document.getElementById('codex-item-' + id);
     if (sideEl) sideEl.classList.add('active');
-    if (item.modelShape === 'sphere') {
-        setPreviewSphere(item.color, item.modelSize);
-    } else {
-        setPreviewMesh(item.color, item.modelSize[0], item.modelSize[1], item.modelSize[2]);
-    }
-    document.getElementById('preview-label').innerText = '// ' + item.name + ' //';
+    setPreviewModel(tab, item);
+    document.getElementById('preview-label').innerText = item.name;
     const info = document.getElementById('codex-info');
     info.classList.remove('slide-in');
     void info.offsetWidth;
     info.classList.add('slide-in');
     const isOp     = tab === 'operatives';
     const isChosen = isOp && id === selectedChar;
+    const selBtn = isOp ? `
+            <button class="select-op-btn ${isChosen ? 'already-selected' : ''}"
+                    onclick="pickOperative('${id}'); if (typeof Sound !== 'undefined') Sound.uiClick();">
+                ${isChosen ? '&#10003; SELECTED' : '&#9658; PLAY AS ' + item.name}
+            </button>` : '';
     info.innerHTML = `
-        <div class="info-name" style="color:${item.hex};text-shadow:0 0 24px ${item.hex}55;">
-            ${item.name}
+        <div class="info-head">
+            <div class="info-name"><span class="info-dot" style="background:${item.hex};"></span>${item.name}</div>
+            ${selBtn}
         </div>
-        <div class="info-tag" style="color:${item.hex};border-color:${item.hex};">${item.tag}</div>
+        <div class="info-tag" style="background:${item.hex};">${item.tag}</div>
         <div class="info-desc">${item.desc}</div>
         <div class="info-stats">
             ${item.stats.map(s => `
                 <div class="info-stat-row">
                     <span class="stat-lbl">${s.label}</span>
                     <div class="stat-track">
-                        <div class="stat-fill" data-val="${s.val}" style="background:${s.color};box-shadow:0 0 6px ${s.color};width:0%;"></div>
+                        <div class="stat-fill" data-val="${s.val}" style="background:${item.hex};width:0%;"></div>
                     </div>
                     <span class="stat-num">${s.val}</span>
                 </div>
             `).join('')}
         </div>
         <div class="info-perks">
-            ${item.perks.map(p => `<div class="perk-item">&rsaquo; ${p}</div>`).join('')}
+            ${item.perks.map(p => `<div class="perk-item">${p}</div>`).join('')}
         </div>
-        ${isOp ? `
-            <button class="select-op-btn ${isChosen ? 'already-selected' : ''}"
-                    onclick="pickOperative('${id}')">
-                ${isChosen ? '&#10003; OPERATIVE SELECTED' : '&#9658; SELECT THIS OPERATIVE'}
-            </button>
-        ` : ''}
     `;
     setTimeout(() => {
         document.querySelectorAll('.stat-fill').forEach(bar => {
@@ -405,6 +411,7 @@ function showCodexEntry(tab, id) {
 
 function pickOperative(id) {
     selectedChar = id;
+    try { localStorage.setItem('msc_operative', id); } catch (e) {}
     document.querySelectorAll('.codex-item').forEach(el => {
         el.classList.remove('selected-operative');
         el.querySelector('.item-check')?.remove();
@@ -423,7 +430,7 @@ function pickOperative(id) {
 function updateMenuSelectedChar() {
     const data = CODEX_DATA.operatives.find(o => o.id === selectedChar);
     const el   = document.getElementById('menu-selected-char');
-    if (data && el) el.innerHTML = `<span style="color:${data.hex};">&#9658; ${data.name}</span>`;
+    if (data && el) el.innerHTML = `<span class="op-dot" style="background:${data.hex};"></span>${data.name} <small>CHANGE ›</small>`;
 }
 
 // ── Difficulty mode ──
@@ -535,6 +542,7 @@ function init() {
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
     }
+    renderer.domElement.style.visibility = '';   // hidden while on the menu (exitToMenu)
 
     // Golden Hour Toon world: sky, light, shadows, buildings, FX pools, gun viewmodel
     buildingLights = [];
@@ -1613,9 +1621,35 @@ function resumeGame() {
     animate();
 }
 
+// Back to the menu WITHOUT reloading the page: a reload throws the phone out of
+// fullscreen (browsers only allow re-entering on a fresh tap), which is why the
+// game kept dropping out of fullscreen after ABORT / MENU.
 function exitToMenu() {
     if (score > highScore) { highScore = score; localStorage.setItem('msc_highscore', highScore); }
-    window.location.reload();
+    if (typeof NEXUS !== 'undefined') { if (NEXUS.isTraining) NEXUS.stopTraining(); if (NEXUS.on) NEXUS.disable(); }
+    gameRunning = false; gamePaused = false; tutorialMode = false;
+    if (typeof Juice !== 'undefined') { Juice.onPause(true); Juice.run.firing = false; }
+    if (document.pointerLockElement) document.exitPointerLock();
+    enemies.forEach(e => disposeMesh(e.mesh)); bullets.forEach(b => disposeMesh(b.mesh));
+    enemyBullets.forEach(b => disposeMesh(b.mesh)); drops.forEach(d => disposeMesh(d.mesh));
+    enemies.length = 0; bullets.length = 0; enemyBullets.length = 0; drops.length = 0;
+    buildings.length = 0; particles.length = 0; killFeedEntries.length = 0;
+    score = 0; wave = 0; enemiesToSpawn = 0; isWaveTransition = false;
+    isBossWave = false; currentWaveModifier = null; isReloading = false; lastShotTime = 0;
+    shakeAmount = 0; damageFlashAmount = 0; chromaAmount = 0; yaw = 0; pitch = 0;
+    ['ui', 'crosshair', 'boosts-hud', 'mobile-controls', 'pause-menu', 'gameover', 'boss-bar-wrapper']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+    const mm = document.getElementById('minimap'); if (mm) mm.style.display = 'none';
+    const go = document.getElementById('gameover'); if (go) go.classList.remove('show');
+    const pm = document.getElementById('perk-modal'); if (pm) pm.classList.remove('show');
+    if (typeof hideTutHint === 'function') hideTutHint();
+    document.body.classList.remove('in-run');
+    if (renderer) renderer.domElement.style.visibility = 'hidden';
+    document.getElementById('menu').style.display = 'flex';
+    const hsEl = document.getElementById('menu-hs'); if (hsEl) hsEl.innerText = highScore.toLocaleString();
+    updateMenuRankDisplay();
+    if (typeof Juice !== 'undefined' && Juice.renderMenuProgress) Juice.renderMenuProgress();
+    if (typeof Fullscreen !== 'undefined') Fullscreen.ensure();
 }
 
 document.addEventListener('pointerlockchange', () => {
@@ -1636,6 +1670,7 @@ window.addEventListener('resize', () => {
 });
 
 document.getElementById('menu-hs').innerText = highScore.toLocaleString();
+updateMenuSelectedChar();
 
 // Init rank display on menu
 updateMenuRankDisplay();
