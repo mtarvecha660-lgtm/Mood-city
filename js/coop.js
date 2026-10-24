@@ -123,7 +123,8 @@ window.Coop = (() => {
         tryOpen(0);
     }
     function onHostConn(conn) {
-        conn.on('data', d => hostRecv(conn, d));
+        const pr = peer;
+        conn.on('data', d => { if (peer && peer === pr) hostRecv(conn, d); });
         conn.on('close', () => dropConn(conn));
         conn.on('error', () => dropConn(conn));
     }
@@ -192,11 +193,14 @@ window.Coop = (() => {
         players.clear();
         peer = new Peer({ debug: 0 });
         peer.on('open', () => {
-            hostConn = peer.connect(PREFIX + want, { reliable: true, serialization: 'json' });
-            hostConn.on('open', () => { lastHostMsg = performance.now(); send(hostConn, { t: 'hello', n: myName(), c: selectedChar }); });
-            hostConn.on('data', clientRecv);
-            hostConn.on('close', hostLeft);
-            hostConn.on('error', hostLeft);
+            const hc = hostConn = peer.connect(PREFIX + want, { reliable: true, serialization: 'json' });
+            // only the CURRENT connection may drive us: a closed room's late packets
+            // (a 'start' or a 'snap' after we left) must not pull us back into co-op
+            const live = () => hostConn === hc;
+            hc.on('open', () => { if (!live()) return; lastHostMsg = performance.now(); send(hc, { t: 'hello', n: myName(), c: selectedChar }); });
+            hc.on('data', m => { if (live()) clientRecv(m); });
+            hc.on('close', () => { if (live()) hostLeft(); });
+            hc.on('error', () => { if (live()) hostLeft(); });
         });
         peer.on('error', err => {
             if (err && err.type === 'peer-unavailable') { status('No room called ' + want + '. Check the code with your friend.', true); resetNet(); return; }
@@ -779,7 +783,8 @@ window.Coop = (() => {
         const tut = $('tutorial-overlay'); if (tut) tut.style.display = 'none';
         $('menu').style.display = 'none';
         checkDevice();
-        if (isMobile) requestFullscreen();
+        if (!isMobile) lockPointer();              // lock before fullscreen: fullscreen uses up the click's gesture
+        requestFullscreen();                       // START RUN is a click: desktop goes fullscreen too
         startGameCore();
         if (isMobile && !isLandscape()) updateOrientationOverlay();
         if (!isMobile) setTimeout(() => { if (running && gameRunning && !document.pointerLockElement) showMenu(); }, 500);
@@ -799,7 +804,11 @@ window.Coop = (() => {
     }
     function hostLeft() {
         if (role !== 'client') return;
-        if (!inRoom) { resetNet(); return; }
+        // already handled (the 'bye' and the connection 'close' both land here):
+        // the HOST LEFT screen is up and BACK TO MENU ends the session for good.
+        // (This second call used to wipe the session state but leave the squad
+        // HUD on screen, so it sat on top of the main menu.)
+        if (!inRoom) { if (!active) { resetNet(); hideOverlays(); } return; }
         if (active) {
             running = false;
             gameRunning = false;
@@ -815,37 +824,61 @@ window.Coop = (() => {
             showPane('choose');
         }
     }
+    // Ends co-op completely: tells the others, closes the peer, empties the room
+    // and the teammates, and clears every co-op overlay. Safe to call any time
+    // (exitToMenu always calls it), so nothing from a session survives to the menu.
     function leave() {
         if (role === 'host') broadcast({ t: 'bye' });
         else if (hostConn) send(hostConn, { t: 'bye' });
         resetNet();
-        active = false; running = false; downed = false;
+        active = false; running = false; downed = false; wipeAt = 0;
+        spawnAt = null; mySlot = 0; pendingHits = []; pickedIds.clear();
         tracers.forEach(t => disposeMesh(t.mesh)); tracers = [];
-        document.body.classList.remove('coop-run');
-        ['coop-down', 'coop-revive', 'coop-end'].forEach(id => $(id).classList.remove('show'));
-        $('coop-hud').style.display = 'none';
+        hideOverlays(true);
         const t = $('pause-title'); if (t) t.textContent = 'STANDBY';
         const tag = $('pause-tag'); if (tag) tag.innerHTML = '<span class="status-pulse-dot"></span> TACTICAL FEED SUSPENDED';
         if (/[?&]room=/.test(location.search)) { try { history.replaceState(null, '', location.pathname); } catch (e) {} }
     }
+    function hideOverlays(all) {
+        document.body.classList.remove('coop-run');
+        ['coop-down', 'coop-revive'].concat(all ? ['coop-end'] : []).forEach(id => { const el = $(id); if (el) el.classList.remove('show'); });
+        const h = $('coop-hud'); if (h) { h.style.display = 'none'; h.innerHTML = ''; h._html = ''; }
+    }
+    // The squad HUD and the down / revive overlays belong to a live co-op run
+    // only. A light watchdog keeps it that way whatever path left the run
+    // (menu, game over, host left, a dropped connection, settings…).
+    function inLiveRun() {
+        const menu = $('menu');
+        return active && running && gameRunning && !(menu && menu.style.display !== 'none');
+    }
+    setInterval(() => {
+        const h = $('coop-hud'); if (!h) return;
+        if (!inLiveRun()) {
+            if (h.style.display !== 'none' || document.querySelector('#coop-down.show, #coop-revive.show')) hideOverlays(false);
+            const menu = $('menu');
+            if (!active && menu && menu.style.display !== 'none') { const e = $('coop-end'); if (e) e.classList.remove('show'); }
+        } else if (h.style.display === 'none') h.style.display = 'block';
+    }, 250);
     function resetNet(keepActive) {
         clearInterval(netTimer); netTimer = null;
         clearTimeout(connectTimer);
         const p = peer; peer = null;
-        setTimeout(() => { try { if (p) p.destroy(); } catch (e) {} }, 200);
+        const old = [hostConn, ...[...conns.values()].map(c => c.conn)];
         hostConn = null; conns.clear();
+        old.forEach(c => { try { if (c) c.close(); } catch (e) {} });
+        setTimeout(() => { try { if (p) p.destroy(); } catch (e) {} }, 200);
         for (const pl of players.values()) dropAvatar(pl);
         if (!keepActive) players.clear();
         enemyById.clear();
         inRoom = false;
-        if (!keepActive) { role = null; code = ''; active = false; running = false; }
+        if (!keepActive) { role = null; code = ''; active = false; running = false; downed = false; hideOverlays(false); }
     }
 
     // ───────────────────────── HUD ─────────────────────────
     function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
     function renderHud() {
         const el = $('coop-hud');
-        if (!el || !active) return;
+        if (!el || !inLiveRun()) return;
         const me = players.get(mySlot);
         if (me) { me.hp = Math.max(0, Math.ceil(hp)); me.mhp = playerMaxHp; me.down = downed; me.score = score; }
         const rows = [...players.values()].sort((a, b) => a.slot - b.slot).map(p => {
@@ -931,7 +964,7 @@ window.Coop = (() => {
         const codeIn = $('coop-code-in');
         codeIn.addEventListener('input', () => { codeIn.value = codeIn.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5); });
         codeIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clickJoin(); } });
-        $('coop-x').addEventListener('click', () => { click(); if (inRoom) leave(); closeModal(); });
+        $('coop-x').addEventListener('click', () => { click(); if (inRoom || peer) leave(); closeModal(); });
         $('coop-host-btn').addEventListener('click', () => { click(); host(); });
         $('coop-join-btn').addEventListener('click', clickJoin);
         $('coop-start').addEventListener('click', () => { click(); hostStart(); });
@@ -949,7 +982,7 @@ window.Coop = (() => {
     function clickJoin() {
         click();
         checkDevice();
-        if (isMobile) requestFullscreen();          // the tap is the gesture fullscreen needs
+        requestFullscreen();                        // the tap/click is the gesture fullscreen needs
         if (audioCtx.state === 'suspended') audioCtx.resume();
         join($('coop-code-in').value);
     }

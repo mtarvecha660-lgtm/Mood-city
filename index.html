@@ -20,9 +20,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Mood City">
     <link rel="apple-touch-icon" href="icons/icon-180.png">
-    <link rel="stylesheet" href="css/style.css?v=14">
-    <link rel="stylesheet" href="css/golden.css?v=14">
-    <link rel="stylesheet" href="css/coop.css?v=14">
+    <link rel="stylesheet" href="css/style.css?v=15">
+    <link rel="stylesheet" href="css/golden.css?v=15">
+    <link rel="stylesheet" href="css/coop.css?v=15">
 </head>
 <body>
 
@@ -39,6 +39,7 @@
 <div id="menu">
     <div id="menu-sky"><div class="sky-sun"></div><div id="skyline-back" class="skyline"></div><div id="skyline-front" class="skyline"></div></div>
     <button class="mute-btn" id="mute-btn-menu" aria-label="Mute">🔊</button>
+    <button class="fs-btn" id="fs-btn-menu" aria-label="Full screen (F)" title="Full screen (F)">⛶</button>
     <div id="menu-grid"></div>
     <div class="scanlines-overlay"></div>
     <div id="menu-ambient-glow"></div>
@@ -306,6 +307,7 @@
 
 <!-- In-run mute toggle -->
 <button class="mute-btn" id="mute-btn-hud" aria-label="Mute">🔊</button>
+<button class="fs-btn" id="fs-btn-hud" aria-label="Full screen (F)" title="Full screen (F)">⛶</button>
 
 <!-- Floating Combat Feedback Layer (Kill pops, headshots, combos) -->
 <div id="feedback-layer"></div>
@@ -364,16 +366,16 @@
 
 <!-- Scripts -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="js/state.js?v=14"></script>
-<script src="js/audio.js?v=14"></script>
-<script src="js/mobile.js?v=14"></script>
-<script src="js/controls.js?v=14"></script>
-<script src="js/tutorial.js?v=14"></script>
-<script src="js/toon.js?v=14"></script>
-<script src="js/juice.js?v=14"></script>
-<script src="js/game.js?v=14"></script>
-<script src="js/ai-player.js?v=14"></script>
-<script src="js/coop.js?v=14"></script>
+<script src="js/state.js?v=15"></script>
+<script src="js/audio.js?v=15"></script>
+<script src="js/mobile.js?v=15"></script>
+<script src="js/controls.js?v=15"></script>
+<script src="js/tutorial.js?v=15"></script>
+<script src="js/toon.js?v=15"></script>
+<script src="js/juice.js?v=15"></script>
+<script src="js/game.js?v=15"></script>
+<script src="js/ai-player.js?v=15"></script>
+<script src="js/coop.js?v=15"></script>
 <script>
 // Menu backdrop: two layers of flat skyline silhouettes
 (function() {
