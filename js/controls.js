@@ -10,6 +10,7 @@ function setupControls() {
         keys[e.key.toLowerCase()] = true;
         if (e.key.toLowerCase() === 'r') reload();
         if (e.key.toLowerCase() === 'f') fireSecondary();
+        if (e.key.toLowerCase() === 'q' || e.key.toLowerCase() === 'v') toggleMelee();
     });
     document.addEventListener('keyup', e => {
         keys[e.key.toLowerCase()] = false;
@@ -78,4 +79,9 @@ function setupControls() {
     document.getElementById('fire-btn').addEventListener('touchstart',   e => { e.preventDefault(); shoot();         });
     document.getElementById('reload-btn').addEventListener('touchstart',  e => { e.preventDefault(); reload();        });
     document.getElementById('rocket-btn').addEventListener('touchstart',  e => { e.preventDefault(); fireSecondary(); });
+    const mb = document.getElementById('melee-btn');
+    if (mb) {
+        mb.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); toggleMelee(); });
+        mb.addEventListener('click', e => { e.stopPropagation(); if (!isMobile) toggleMelee(); });
+    }
 }

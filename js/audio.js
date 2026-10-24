@@ -169,6 +169,40 @@ const AudioEngine = (() => {
             osc.stop(now + 0.5);
         },
 
+        // ── Melee (bat) ──
+        playSwing() {                       // airy whoosh: bandpassed noise sweeping down
+            const c = getContext(); if (!c) return;
+            const now = c.currentTime;
+            const n = c.createBufferSource(); n.buffer = getNoiseBuffer(c);
+            const f = c.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.4;
+            f.frequency.setValueAtTime(2400, now); f.frequency.exponentialRampToValueAtTime(500, now + 0.22);
+            const g = c.createGain();
+            g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(0.32, now + 0.06); g.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+            n.connect(f); f.connect(g); g.connect(masterGain); n.start(now); n.stop(now + 0.26);
+        },
+        playBonk() {                        // cartoon wooden thwack + low thump
+            const c = getContext(); if (!c) return;
+            const now = c.currentTime;
+            const o = c.createOscillator(), g = c.createGain();
+            o.type = 'triangle'; o.frequency.setValueAtTime(420, now); o.frequency.exponentialRampToValueAtTime(140, now + 0.12);
+            g.gain.setValueAtTime(0.45, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+            o.connect(g); g.connect(masterGain); o.start(now); o.stop(now + 0.18);
+            const n = c.createBufferSource(); n.buffer = getNoiseBuffer(c);
+            const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
+            const g2 = c.createGain(); g2.gain.setValueAtTime(0.35, now); g2.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+            n.connect(f); f.connect(g2); g2.connect(masterGain); n.start(now); n.stop(now + 0.09);
+        },
+        playWeaponSwap() {
+            const c = getContext(); if (!c) return;
+            const now = c.currentTime;
+            [520, 780].forEach((fr, k) => {
+                const o = c.createOscillator(), g = c.createGain();
+                o.type = 'square'; o.frequency.setValueAtTime(fr, now + k * 0.05);
+                g.gain.setValueAtTime(0.0001, now); g.gain.setValueAtTime(0.06, now + k * 0.05); g.gain.exponentialRampToValueAtTime(0.001, now + k * 0.05 + 0.05);
+                o.connect(g); g.connect(masterGain); o.start(now); o.stop(now + 0.14);
+            });
+        },
+
         // ── Hits, Kills, Combos ──
         playHit() {
             const c = getContext(); if (!c) return;

@@ -76,55 +76,127 @@ const Fullscreen = (() => {
 
 function requestFullscreen() { Fullscreen.enter(); }
 
-// ── Gyroscope ──
-let gyroPrev = null;
+// ── Gyroscope aim ──
+// What was wrong before: it read raw Euler beta/gamma deltas as if beta = turn and
+// gamma = tilt. In landscape that's wrong (turning the phone mostly changes alpha),
+// it ignored which way the phone is rotated (90° vs 270° flips the signs), gamma
+// wraps at ±90° (the camera jumped when the phone passed vertical), and the
+// listener was only attached when you flipped the toggle, so after a reload the
+// setting said ON but nothing listened. Re-toggling also stacked duplicate listeners.
+//
+// Now: the device orientation becomes a full quaternion (the standard
+// DeviceOrientationControls maths), corrected for screen.orientation.angle, and we
+// read the yaw/pitch of the direction the phone's back camera points. Only the
+// frame-to-frame CHANGE is added to yaw/pitch, so it stacks with touch-drag look.
+// Low-pass smoothing + a small soft deadzone remove hand jitter; enabling (or
+// resuming) recenters, i.e. however you hold the phone right now = neutral.
+const Gyro = (() => {
+    const DEG = Math.PI / 180;
+    const zee = new THREE.Vector3(0, 0, 1);
+    const q0 = new THREE.Quaternion();
+    const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -90° about X: look out of the back of the device
+    const euler = new THREE.Euler();
+    const q = new THREE.Quaternion();
+    const fwd = new THREE.Vector3();
+    let listening = false, ref = null, smooth = null, lastEventAt = 0, gotAny = false;
+    const SMOOTH = 0.35;          // 0..1, higher = snappier
+    const DEADZONE = 0.0009;      // rad per event (~0.05°): kills jitter, keeps slow aim
 
-function startGyro() {
-    function handleOrientation(e) {
-        if (!settings.gyroEnabled || !gameRunning || gamePaused) { gyroPrev = null; return; }
-        if (gyroPrev === null) { gyroPrev = { beta: e.beta, gamma: e.gamma }; return; }
-        const sens   = settings.gyroSensitivity * 0.004;
-        // In landscape: turning phone left/right = beta change (yaw)
-        //               tilting phone up/down   = gamma change (pitch)
-        let dbeta  = e.beta  - gyroPrev.beta;
-        let dgamma = e.gamma - gyroPrev.gamma;
-        // Clamp large jumps so orientation wrap-around doesn't glitch the camera
-        dbeta  = Math.max(-8, Math.min(8, dbeta));
-        dgamma = Math.max(-8, Math.min(8, dgamma));
-        yaw   -= dbeta  * sens;
-        pitch += dgamma * sens;
-        pitch  = Math.max(-1.4, Math.min(1.4, pitch));
-        gyroPrev = { beta: e.beta, gamma: e.gamma };
+    function screenAngle() {
+        const so = window.screen && window.screen.orientation;
+        if (so && typeof so.angle === 'number') return so.angle;
+        if (typeof window.orientation === 'number') return window.orientation; // older iOS
+        return 0;
     }
-    window.addEventListener('deviceorientation', handleOrientation, true);
+    // device alpha/beta/gamma (deg) + screen angle (deg) -> camera yaw/pitch (rad), game convention
+    function toYawPitch(alpha, beta, gamma, orient) {
+        euler.set(beta * DEG, alpha * DEG, -gamma * DEG, 'YXZ');
+        q.setFromEuler(euler);
+        q.multiply(q1);
+        q.multiply(q0.setFromAxisAngle(zee, -orient * DEG));
+        fwd.set(0, 0, -1).applyQuaternion(q);
+        return { yaw: Math.atan2(-fwd.x, -fwd.z), pitch: Math.asin(Math.max(-1, Math.min(1, fwd.y))) };
+    }
+    const wrap = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+    const soft = d => Math.sign(d) * Math.max(0, Math.abs(d) - DEADZONE);
+
+    function onOrient(e) {
+        if (e.alpha === null && e.beta === null) return;   // desktop/no sensor fires an empty event
+        gotAny = true; lastEventAt = performance.now();
+        if (!settings.gyroEnabled || !gameRunning || gamePaused) { ref = null; return; }
+        const raw = toYawPitch(e.alpha || 0, e.beta || 0, e.gamma || 0, screenAngle());
+        if (!smooth || !ref) { smooth = { yaw: raw.yaw, pitch: raw.pitch }; ref = { yaw: raw.yaw, pitch: raw.pitch }; return; }
+        smooth.yaw   = wrap(smooth.yaw + wrap(raw.yaw - smooth.yaw) * SMOOTH);
+        smooth.pitch = smooth.pitch + (raw.pitch - smooth.pitch) * SMOOTH;
+        let dYaw = wrap(smooth.yaw - ref.yaw), dPitch = smooth.pitch - ref.pitch;
+        // pointing almost straight up/down makes yaw meaningless; ignore yaw there
+        if (Math.abs(smooth.pitch) > 1.35) dYaw = 0;
+        // a huge single-event jump = sensor glitch / orientation flip: just re-anchor
+        if (Math.abs(dYaw) > 0.6 || Math.abs(dPitch) > 0.6) { ref = { yaw: smooth.yaw, pitch: smooth.pitch }; return; }
+        const k = settings.gyroSensitivity / 10;           // 10 = 1:1 (turn the phone 30°, view turns 30°)
+        yaw   += soft(dYaw) * k;
+        pitch += soft(dPitch) * k;
+        pitch  = Math.max(-1.4, Math.min(1.4, pitch));
+        ref = { yaw: smooth.yaw, pitch: smooth.pitch };
+    }
+
+    function listen() {
+        if (listening) return;
+        listening = true;
+        window.addEventListener('deviceorientation', onOrient, true);
+    }
+    function recenter() { ref = null; smooth = null; }
+
+    return { listen, recenter, toYawPitch, onOrient, get gotAny() { return gotAny; }, get lastEventAt() { return lastEventAt; } };
+})();
+// re-anchor when the phone flips between the two landscape orientations
+if (window.screen && screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', () => Gyro.recenter());
+window.addEventListener('orientationchange', () => Gyro.recenter());
+
+function recenterGyro(showNote) {
+    Gyro.recenter();
+    if (showNote) gyroNote('Recentered: hold the phone how you like to aim');
+}
+function gyroNote(text) {
+    const n = document.getElementById('gyro-note');
+    if (n) n.textContent = text;
+}
+
+function startGyro() { Gyro.listen(); Gyro.recenter(); }
+// Settings saved as ON from an earlier visit: start listening right away
+// (Android needs no permission prompt; iOS asks again from the toggle tap).
+if (typeof settings !== 'undefined' && settings.gyroEnabled &&
+    !(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function')) {
+    startGyro();
 }
 
 function enableGyro() {
-    if (typeof DeviceOrientationEvent !== 'undefined' &&
-        typeof DeviceOrientationEvent.requestPermission === 'function') {
-        // iOS 13+: needs explicit permission
-        DeviceOrientationEvent.requestPermission()
-            .then(state => {
-                if (state === 'granted') {
-                    settings.gyroEnabled = true;
-                    saveSettings();
-                    startGyro();
-                    updateSettingsUI();
-                }
-            }).catch(() => {});
-    } else {
+    if (!window.isSecureContext) { gyroNote('Gyro needs a secure (https) page'); return; }
+    if (typeof DeviceOrientationEvent === 'undefined') { gyroNote('No motion sensor on this device'); return; }
+    const turnOn = () => {
         settings.gyroEnabled = true;
         saveSettings();
         startGyro();
         updateSettingsUI();
-    }
+        gyroNote('On · hold the phone how you like to aim');
+        // no sensor events within 1.5 s = no gyro on this device
+        const t0 = performance.now();
+        setTimeout(() => { if (!Gyro.gotAny || Gyro.lastEventAt < t0 - 1) gyroNote('No motion data from this device yet'); }, 1500);
+    };
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        // iOS 13+: must be called straight from the tap
+        DeviceOrientationEvent.requestPermission()
+            .then(state => { if (state === 'granted') turnOn(); else gyroNote('Motion access was denied (Settings › Safari › Motion & Orientation)'); })
+            .catch(() => gyroNote('Motion access needs a tap to allow'));
+    } else turnOn();
 }
 
 function disableGyro() {
     settings.gyroEnabled = false;
-    gyroPrev = null;
+    Gyro.recenter();
     saveSettings();
     updateSettingsUI();
+    gyroNote('tilt the phone to aim');
 }
 
 function updateOrientationOverlay() {
