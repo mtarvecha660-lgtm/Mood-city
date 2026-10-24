@@ -32,6 +32,23 @@ New files: `js/toon.js` (art direction, enemies, FX, gun), `js/juice.js` (feel, 
 
 ---
 
+## Co-op (2–4 players)
+
+Play the same run with friends, on phones or desktop. No account, no server of ours: players connect peer-to-peer (WebRTC through PeerJS's free public broker).
+
+1. One player taps **👥 CO-OP → HOST A ROOM** and gets a 4-letter room code.
+2. Friends tap **CO-OP**, type the code and hit **JOIN**, or just open the shared link (`?room=CODE`).
+3. The host taps **START RUN**. Friends can also join a run that has already started.
+
+**Rules**
+- Shared waves: more enemies and tougher enemies the more players there are.
+- Each player keeps their own HP, ammo, perks and score. Your own kills give you score and XP, and every player gets the wave bonus.
+- When you go down, a teammate revives you by standing next to you for 3 seconds. The run ends only when the whole squad is down.
+- The host runs the city (enemies, waves, drops). If a friend leaves, they just drop out. If the host leaves, the run ends for everyone.
+- Pausing never freezes a co-op run, and AI features are off in co-op.
+
+**Limits:** max 4 players. Some strict networks (some office, school or carrier networks) block peer-to-peer; switching between Wi-Fi and mobile data usually fixes it. The host should keep the game on screen: if the host's tab goes to the background, the city pauses for everyone.
+
 ## Controls
 
 | Input | Action |
@@ -216,13 +233,19 @@ Open from the main menu. Browse full stats, descriptions, and 3D previews of eve
 ```
 ├── index.html        — All markup: menu, HUD, boss bar, kill feed, touch controls
 ├── css/
-│   └── style.css     — All styling and animations
+│   ├── style.css     — Base styling and animations
+│   ├── golden.css    — Golden Hour Toon look (overrides style.css)
+│   └── coop.css      — Co-op lobby, squad HUD, down/revive screens
 └── js/
     ├── state.js      — Shared state, constants, audio, rank/achievement data
     ├── controls.js   — Keyboard (incl. F key), mouse, pointer-lock, touch input
     ├── mobile.js     — Fullscreen, orientation lock, gyroscope
     ├── tutorial.js   — Tutorial slides and practice run
-    └── game.js       — World, game loop, enemies, bullets, drops, waves, HUD, all features
+    ├── toon.js       — Toon world, characters, guns, effects
+    ├── juice.js      — Game feel, perks, levels, run-over screen
+    ├── game.js       — World, game loop, enemies, bullets, drops, waves, HUD, all features
+    ├── ai-player.js  — Optional AI features (off by default, Settings)
+    └── coop.js       — Room-code co-op over WebRTC (host-authoritative)
 ```
 
 ---

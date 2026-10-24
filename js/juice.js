@@ -399,6 +399,7 @@ const Juice = (() => {
         isWaveTransition = true;
         sfx.waveClear();
         callout('WAVE ' + wave + ' CLEARED', '+' + (wave * 100) + ' bonus', 4);
+        if (typeof Coop !== 'undefined' && Coop.active) Coop.onWaveCleared();
         const gen = runGen;
         setTimeout(() => { if (gen === runGen && gameRunning) showPerks(); }, 1100);
     }
@@ -419,9 +420,9 @@ const Juice = (() => {
         const auto = (typeof NEXUS !== 'undefined' && NEXUS.on) || (document.getElementById('nexus-train-hud') && getComputedStyle($('nexus-train-hud')).display !== 'none');
         if (auto) { pickPerk(0, true); return; }
         picking = true;
-        gamePaused = true;
+        const coop = typeof Coop !== 'undefined' && Coop.active;
+        if (!coop) { gamePaused = true; stopAmbient(); }   // co-op: the shared run keeps going
         run.firing = false;
-        stopAmbient();
         if (!isMobile && document.pointerLockElement) document.exitPointerLock();
         const m = $('perk-modal');
         m.innerHTML = `<div class="perk-head"><div class="perk-kicker">WAVE ${wave} CLEARED</div><div class="perk-title">Pick a perk</div></div>
@@ -450,6 +451,7 @@ const Juice = (() => {
             startAmbient();
             animate();
         }
+        if (typeof Coop !== 'undefined' && Coop.active) return;   // co-op: the host starts the next wave for everyone
         startWave(wave + 1);
     }
 
@@ -530,6 +532,7 @@ const Juice = (() => {
     }
 
     function restartRun() {
+        if (typeof Coop !== 'undefined' && Coop.active) { Coop.playAgain(); return; }
         sfx.ui();
         runGen++;
         const el = $('gameover'); el.classList.remove('show'); el.style.display = 'none';
@@ -595,5 +598,5 @@ const Juice = (() => {
 
     return { dmgNumber, onShoot, onHit, onKill, onWaveStart, onWaveCleared, onPlayerHit, onRunStart, onPause, update,
              showGameOver, restartRun, dropChance, pickupRadius, extraShots, cycleSkin, renderMenuProgress,
-             toggleMute, levelFor, xpForLevel, callout, get picking() { return picking; }, sfx, run };
+             toggleMute, levelFor, xpForLevel, callout, pickPerk, get picking() { return picking; }, sfx, run };
 })();

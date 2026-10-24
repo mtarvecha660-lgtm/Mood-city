@@ -692,6 +692,7 @@ const NEXUS = (() => {
     // ─────────────────────────────────────────────────────────────
     function startTraining() {
         if (training) return;
+        if (typeof Coop !== 'undefined' && Coop.active) return;   // no AI practice in co-op
         training      = true;
         aiAssistedRun = true;
         trainRunCount = 0;
@@ -790,6 +791,7 @@ const NEXUS = (() => {
     //  ENABLE / DISABLE (manual co-pilot mode, unchanged)
     // ─────────────────────────────────────────────────────────────
     function enable() {
+        if (typeof Coop !== 'undefined' && Coop.active) return;   // AI can't play in co-op
         if (active || training) return;
         active = true;
         ai.lastHp    = hp || 100;
@@ -1675,6 +1677,7 @@ const AIMenu = (() => {
 
     function open() {
         if (!settings.aiFeatures) return;
+        if (typeof Coop !== 'undefined' && Coop.active) { if (typeof showFloatingFeedback === 'function') showFloatingFeedback('AI IS OFF IN CO-OP', 'warn'); return; }
         if (typeof gameRunning !== 'undefined' && gameRunning && !gamePaused && !NEXUS.isTraining) {
             gamePaused = true; pausedByMenu = true;
             if (typeof Juice !== 'undefined') Juice.onPause(true);
