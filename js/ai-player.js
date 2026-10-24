@@ -64,6 +64,7 @@ const NEXUS = (() => {
 
         // Heavily penalize enemies we can't see — prefer visible targets
         if (!hasLineOfSight(player.position, e.mesh.position)) s -= 800;
+        if (ai.ignore && ai.ignore.e === e && performance.now() < ai.ignore.until) s -= 1500;
 
         return s;
     }
@@ -166,39 +167,78 @@ const NEXUS = (() => {
     //  Mirrors the game loop's own collision handling exactly.
     // ─────────────────────────────────────────────────────────────
     function moveWorld(wx, wz) {
+        // while escaping a wedge, the escape direction wins over whatever the phase wanted
+        if (ai.escape && performance.now() < ai.escape.until) { wx = ai.escape.x; wz = ai.escape.z; }
         const sp  = (boosts && boosts.speed && Date.now() < boosts.speed)
                     ? playerSpeed * 1.8 : playerSpeed;
         const len = Math.sqrt(wx * wx + wz * wz) || 1;
         const mx  = (wx / len) * sp;
         const mz  = (wz / len) * sp;
+        const ox = player.position.x, oz = player.position.z;
 
         player.position.x += mx;
         if (checkCollision(player.position, 0.7)) player.position.x -= mx;
 
         player.position.z += mz;
         if (checkCollision(player.position, 0.7)) player.position.z -= mz;
+
+        // Head-on into a wall: slide along it instead of standing still
+        if (Math.hypot(player.position.x - ox, player.position.z - oz) < sp * 0.3) {
+            for (const side of [ai.slideSide || 1, -(ai.slideSide || 1)]) {
+                const sx = -mz * side, sz = mx * side;
+                player.position.x = ox + sx; player.position.z = oz + sz;
+                if (!checkCollision(player.position, 0.7)) { ai.slideSide = side; return; }
+            }
+            player.position.x = ox; player.position.z = oz;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
     //  STUCK DETECTION
+    //  Old version only counted frames with < 0.02 movement, so jittering
+    //  back and forth against a wall never counted as stuck, and its
+    //  "nudge" was one single step. Now: if we've wanted to travel but
+    //  made < 1.5 units of real progress in 2.5 s, we escape along a
+    //  free direction for ~0.8 s, re-plan the route, and if the same
+    //  hidden target keeps wedging us we drop it for a few seconds.
     // ─────────────────────────────────────────────────────────────
-    function checkStuck() {
-        if (!ai.lastPos) { ai.lastPos = { x: player.position.x, z: player.position.z }; return; }
-        const moved = Math.hypot(
-            player.position.x - ai.lastPos.x,
-            player.position.z - ai.lastPos.z
-        );
-        ai.stuckTicks = (moved < 0.02) ? ai.stuckTicks + 1 : 0;
-        ai.lastPos = { x: player.position.x, z: player.position.z };
+    function checkStuck(wantsTravel) {
+        const now = performance.now();
+        const p = player.position;
+        ai.trail = ai.trail || [];
+        if (!ai.trail.length || now - ai.trail[ai.trail.length - 1].t > 250) ai.trail.push({ t: now, x: p.x, z: p.z });
+        while (ai.trail.length && now - ai.trail[0].t > 2600) ai.trail.shift();
+        if (!wantsTravel) { ai.stuckTicks = 0; return; }
+        if (ai.escape && now < ai.escape.until) return;
+        const first = ai.trail[0];
+        if (now - first.t < 2300) return;
+        let far = 0;
+        for (const s of ai.trail) far = Math.max(far, Math.hypot(p.x - s.x, p.z - s.z));
+        if (far >= 1.5) return;
 
-        if (ai.stuckTicks > 18) {
-            ai.stuckTicks  = 0;
-            ai.strafeDir  *= -1;
-            ai.strafeTimer = 0;
-            const ang = Math.random() * Math.PI * 2;
-            moveWorld(Math.cos(ang) * 3, Math.sin(ang) * 3);
-            log('UNSTUCK — nudge');
+        ai.stuckTicks++;
+        ai.unstucks = (ai.unstucks || 0) + 1;
+        // escape: the free direction with the most open space, away from where we were pushing
+        let best = null, bestScore = -1;
+        for (let k = 0; k < 12; k++) {
+            const a = (k / 12) * Math.PI * 2 + Math.random() * 0.3, dx = Math.cos(a), dz = Math.sin(a);
+            let open = 0;
+            for (let r = 1; r <= 6; r++) { if (blockedAt(p.x + dx * r, p.z + dz * r)) break; open = r; }
+            const score = open + Math.random();
+            if (score > bestScore) { bestScore = score; best = { x: dx, z: dz }; }
         }
+        ai.escape = { x: best.x, z: best.z, until: now + 800 };
+        ai.slideSide = -(ai.slideSide || 1);
+        ai.strafeDir *= -1;
+        nav.path = null;
+        ai.trail = [];
+        // the same target keeps wedging us → leave it for a bit and fight something reachable
+        const tg = ai.navTarget;
+        if (tg) {
+            ai.wedge = (ai.wedge && ai.wedge.e === tg && now - ai.wedge.t < 20000) ? { e: tg, t: ai.wedge.t, n: ai.wedge.n + 1 } : { e: tg, t: now, n: 1 };
+            if (ai.wedge.n >= 3) { ai.ignore = { e: tg, until: now + 8000 }; ai.wedge = null; log('ROUTE BLOCKED — switching target'); }
+        }
+        log('UNSTUCK — escape + re-route');
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -283,6 +323,153 @@ const NEXUS = (() => {
         return true;
     }
 
+
+    // ─────────────────────────────────────────────────────────────
+    //  NAVIGATION — grid A* around the buildings
+    //  The old controller only ever walked in a straight line at its
+    //  target and "strafed" when a building was in the way. The strafe
+    //  flipped sides every 10–25 frames, so behind a wide building (or
+    //  two buildings touching) it just jittered against the wall forever,
+    //  staring at it, while the last hostile waited on the other side.
+    //  Now it plans a real path around the buildings and follows it.
+    // ─────────────────────────────────────────────────────────────
+    const NAV = { cell: 1, half: 160, n: 320, grid: null, key: '', inflate: 1.05 };
+    function navKey() {
+        if (!buildings || !buildings.length) return 'none';
+        const a = buildings[0], b = buildings[buildings.length - 1];
+        return buildings.length + ':' + a.minX.toFixed(2) + ':' + a.minZ.toFixed(2) + ':' + b.minX.toFixed(2) + ':' + b.minZ.toFixed(2);
+    }
+    function navGrid() {
+        const k = navKey();
+        if (NAV.grid && NAV.key === k) return NAV.grid;
+        const n = NAV.n, g = new Uint8Array(n * n), inf = NAV.inflate;
+        for (const b of (buildings || [])) {
+            const x0 = Math.max(0, Math.floor((b.minX - inf + NAV.half) / NAV.cell));
+            const x1 = Math.min(n - 1, Math.floor((b.maxX + inf + NAV.half) / NAV.cell));
+            const z0 = Math.max(0, Math.floor((b.minZ - inf + NAV.half) / NAV.cell));
+            const z1 = Math.min(n - 1, Math.floor((b.maxZ + inf + NAV.half) / NAV.cell));
+            for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+                const cx = (x + 0.5) * NAV.cell - NAV.half, cz = (z + 0.5) * NAV.cell - NAV.half;
+                if (cx > b.minX - inf && cx < b.maxX + inf && cz > b.minZ - inf && cz < b.maxZ + inf) g[z * n + x] = 1;
+            }
+        }
+        NAV.grid = g; NAV.key = k; nav.path = null;
+        return g;
+    }
+    const toCell = v => Math.floor((v + NAV.half) / NAV.cell);
+    const cellC  = i => (i + 0.5) * NAV.cell - NAV.half;
+    function blockedCell(x, z) {
+        if (x < 0 || z < 0 || x >= NAV.n || z >= NAV.n) return false;   // outside the city: open ground
+        return NAV.grid[z * NAV.n + x] === 1;
+    }
+    function blockedAt(wx, wz) { navGrid(); return blockedCell(toCell(wx), toCell(wz)); }
+    // nearest walkable cell to a world point (spiral search)
+    function freeCellNear(wx, wz, maxR = 12) {
+        const cx = toCell(wx), cz = toCell(wz);
+        if (!blockedCell(cx, cz)) return [cx, cz];
+        let best = null, bd = Infinity;
+        for (let r = 1; r <= maxR && !best; r++) {
+            for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+                if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+                if (blockedCell(cx + dx, cz + dz)) continue;
+                const d = dx * dx + dz * dz;
+                if (d < bd) { bd = d; best = [cx + dx, cz + dz]; }
+            }
+        }
+        return best;
+    }
+    // walkable straight segment? (sampled every half cell against the inflated grid)
+    function segmentClear(ax, az, bx, bz) {
+        navGrid();
+        const d = Math.hypot(bx - ax, bz - az), steps = Math.max(1, Math.ceil(d / (NAV.cell * 0.4)));
+        for (let i = 1; i <= steps; i++) {
+            const t = i / steps;
+            if (blockedAt(ax + (bx - ax) * t, az + (bz - az) * t)) return false;
+        }
+        return true;
+    }
+    function astar(sx, sz, gx, gz) {
+        const g = navGrid(), n = NAV.n;
+        const start = freeCellNear(sx, sz, 4), goal = freeCellNear(gx, gz, 14);
+        if (!start || !goal) return null;
+        const si = start[1] * n + start[0], gi = goal[1] * n + goal[0];
+        if (si === gi) return [{ x: gx, z: gz }];
+        const gScore = new Map(), came = new Map(), closed = new Set();
+        const heap = [];                       // binary heap of [f, idx]
+        const push = (f, i) => { heap.push([f, i]); let c = heap.length - 1; while (c > 0) { const p = (c - 1) >> 1; if (heap[p][0] <= heap[c][0]) break; [heap[p], heap[c]] = [heap[c], heap[p]]; c = p; } };
+        const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let c = 0; for (;;) { const l = 2 * c + 1, r = l + 1; let m = c; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === c) break; [heap[m], heap[c]] = [heap[c], heap[m]]; c = m; } } return top; };
+        const h = i => { const dx = Math.abs(i % n - goal[0]), dz = Math.abs(((i / n) | 0) - goal[1]); return (dx + dz) + (Math.SQRT2 - 2) * Math.min(dx, dz); };
+        gScore.set(si, 0); push(h(si), si);
+        let found = false, guard = 0;
+        while (heap.length && guard++ < 60000) {
+            const [, cur] = pop();
+            if (cur === gi) { found = true; break; }
+            if (closed.has(cur)) continue;
+            closed.add(cur);
+            const cx = cur % n, cz = (cur / n) | 0, gc = gScore.get(cur);
+            for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+                if (!dx && !dz) continue;
+                const nx = cx + dx, nz = cz + dz;
+                if (nx < 0 || nz < 0 || nx >= n || nz >= n || g[nz * n + nx]) continue;
+                if (dx && dz && (g[cz * n + nx] || g[nz * n + cx])) continue;   // no corner cutting
+                const ni = nz * n + nx, ng = gc + ((dx && dz) ? Math.SQRT2 : 1);
+                if (ng < (gScore.has(ni) ? gScore.get(ni) : Infinity)) { gScore.set(ni, ng); came.set(ni, cur); push(ng + h(ni), ni); }
+            }
+        }
+        if (!found) return null;
+        const cells = [];
+        for (let c = gi; c !== undefined && c !== si; c = came.get(c)) cells.push({ x: cellC(c % n), z: cellC((c / n) | 0) });
+        cells.reverse();
+        if (!blockedAt(gx, gz)) cells.push({ x: gx, z: gz });
+        // string-pull: keep only the corners we actually need
+        const out = []; let ax = sx, az = sz, i = 0;
+        while (i < cells.length) {
+            let j = cells.length - 1;
+            while (j > i && !segmentClear(ax, az, cells[j].x, cells[j].z)) j--;
+            out.push(cells[j]); ax = cells[j].x; az = cells[j].z; i = j + 1;
+        }
+        return out;
+    }
+    const nav = { path: null, goal: null, at: 0, fails: 0 };
+    function resetNav() { nav.path = null; nav.goal = null; ai.escape = null; ai.trail = []; ai.ignore = null; ai.wedge = null; ai.navTarget = null; }
+    // Direction to walk to reach (gx,gz) around buildings, or null if we can't plan one.
+    function navDir(gx, gz) {
+        const px = player.position.x, pz = player.position.z, now = performance.now();
+        if (segmentClear(px, pz, gx, gz)) { nav.path = null; return { x: gx - px, z: gz - pz, direct: true }; }
+        const moved = !nav.goal || Math.hypot(nav.goal.x - gx, nav.goal.z - gz) > 3;
+        if (!nav.path || !nav.path.length || moved || now - nav.at > 1500) {
+            nav.path = astar(px, pz, gx, gz); nav.goal = { x: gx, z: gz }; nav.at = now;
+            if (!nav.path) { nav.fails++; return null; }
+            nav.fails = 0;
+        }
+        // drop waypoints we've reached, and skip ahead when a later one is in clear view
+        while (nav.path.length > 1 && (Math.hypot(nav.path[0].x - px, nav.path[0].z - pz) < 0.9 || segmentClear(px, pz, nav.path[1].x, nav.path[1].z))) nav.path.shift();
+        const wp = nav.path[0];
+        if (!wp) return null;
+        if (Math.hypot(wp.x - px, wp.z - pz) < 0.5 && nav.path.length === 1) { nav.path = null; return { x: gx - px, z: gz - pz }; }
+        return { x: wp.x - px, z: wp.z - pz, wp };
+    }
+    // Look where we're walking while the target is hidden (instead of staring at a wall)
+    function lookAlong(d) {
+        if (!d) return;
+        const tYaw = Math.atan2(-d.x, -d.z);
+        let dYaw = tYaw - yaw;
+        while (dYaw >  Math.PI) dYaw -= Math.PI * 2;
+        while (dYaw < -Math.PI) dYaw += Math.PI * 2;
+        yaw += dYaw * 0.18;
+        pitch += (0 - pitch) * 0.15;
+    }
+    // A free direction away from walls/enemies (used when kiting or evading so we don't back into a wall)
+    function freeDir(wx, wz) {
+        const len = Math.hypot(wx, wz) || 1, ux = wx / len, uz = wz / len;
+        const px = player.position.x, pz = player.position.z;
+        for (const a of [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, 2.2, -2.2, Math.PI]) {
+            const c = Math.cos(a), s = Math.sin(a), dx = ux * c - uz * s, dz = ux * s + uz * c;
+            if (segmentClear(px, pz, px + dx * 2.5, pz + dz * 2.5)) return { x: dx, z: dz };
+        }
+        return { x: ux, z: uz };
+    }
+
     // ─────────────────────────────────────────────────────────────
     //  ROCKET LOGIC
     // ─────────────────────────────────────────────────────────────
@@ -339,8 +526,11 @@ const NEXUS = (() => {
         if (dp && scoreDrop(dp) > 200 &&
             player.position.distanceTo(dp.mesh.position) < 35) return 'SEEK_DROP';
 
+        // A far sniper we can see: back off and trade shots. One hiding behind a
+        // building: go get it (backing away from it forever was a soft-lock).
         if (tgt && tgt.name === 'SNIPER' &&
-            player.position.distanceTo(tgt.mesh.position) > 18)  return 'KITE';
+            player.position.distanceTo(tgt.mesh.position) > 18 &&
+            hasLineOfSight(player.position, tgt.mesh.position)) return 'KITE';
 
         return 'HUNT';
     }
@@ -356,40 +546,54 @@ const NEXUS = (() => {
 
     function doHunt(tgt) {
         if (!tgt) { doIdle(null); return; }
+        ai.navTarget = tgt;
 
         const los = hasLineOfSight(player.position, tgt.mesh.position);
+        const tp  = tgt.mesh.position;
 
-        aimAt(tgt.mesh.position);
-
-        const d    = player.position.distanceTo(tgt.mesh.position);
+        const d    = player.position.distanceTo(tp);
         const name = (tgt.name || '').toLowerCase();
         const pref = PREF[name] || 18;
 
-        const dx = tgt.mesh.position.x - player.position.x;
-        const dz = tgt.mesh.position.z - player.position.z;
+        const dx = tp.x - player.position.x;
+        const dz = tp.z - player.position.z;
         const len = Math.sqrt(dx*dx + dz*dz) || 1;
         const ux = dx / len, uz = dz / len;
         const sv = strafeVec(ux, uz);
 
         let wx, wz;
         if (!los) {
-            // No line of sight — move toward enemy while strafing hard to one side
-            // to flank around the building. Pure strafe lets us slide along the wall.
-            wx = ux * 0.5 + sv.x * 1.2;
-            wz = uz * 0.5 + sv.z * 1.2;
-        } else if (d > pref + 2) {
-            wx = ux * 0.85 + sv.x * 0.55;
-            wz = uz * 0.85 + sv.z * 0.55;
-        } else if (d < pref - 2) {
-            wx = -ux * 0.85 + sv.x * 0.55;
-            wz = -uz * 0.85 + sv.z * 0.55;
+            // No line of sight — walk the planned route around the buildings,
+            // looking where we're going, and re-acquire the target when it's in view.
+            const nd = navDir(tp.x, tp.z);
+            if (nd) {
+                const l = Math.hypot(nd.x, nd.z) || 1;
+                wx = nd.x / l; wz = nd.z / l;
+                lookAlong(nd);
+            } else {
+                // no route (target sealed in) — keep one flank side instead of flip-flopping
+                aimAt(tp);
+                wx = ux * 0.4 + (-uz * ai.slideSide || -uz) * 1.0;
+                wz = uz * 0.4 + ( ux * ai.slideSide ||  ux) * 1.0;
+            }
         } else {
-            wx = sv.x;
-            wz = sv.z;
-        }
-
-        if (inDanger(player.position.x + wx * 2, player.position.z + wz * 2)) {
-            wx = -wx; wz = -wz;
+            aimAt(tp);
+            if (d > pref + 2) {
+                const nd = navDir(tp.x, tp.z) || { x: ux, z: uz };
+                const l = Math.hypot(nd.x, nd.z) || 1;
+                wx = (nd.x / l) * 0.85 + sv.x * 0.55;
+                wz = (nd.z / l) * 0.85 + sv.z * 0.55;
+            } else if (d < pref - 2) {
+                const fd = freeDir(-ux, -uz);
+                wx = fd.x * 0.85 + sv.x * 0.55;
+                wz = fd.z * 0.85 + sv.z * 0.55;
+            } else {
+                wx = sv.x;
+                wz = sv.z;
+            }
+            if (inDanger(player.position.x + wx * 2, player.position.z + wz * 2)) {
+                wx = -wx; wz = -wz;
+            }
         }
 
         moveWorld(wx, wz);
@@ -398,16 +602,15 @@ const NEXUS = (() => {
         if (los && ammo > 0 && !isReloading) shoot();
         else if (ammo === 0 && reserve === 0) {
             // Completely out of ammo and no drop yet — kite away from enemies
-            const dx = player.position.x - tgt.mesh.position.x;
-            const dz = player.position.z - tgt.mesh.position.z;
-            const len = Math.sqrt(dx*dx + dz*dz) || 1;
-            moveWorld(dx / len, dz / len);
+            const fd = freeDir(player.position.x - tp.x, player.position.z - tp.z);
+            moveWorld(fd.x, fd.z);
         }
         considerRocket(tgt);
     }
 
     function doKite(tgt) {
         if (!tgt) { doIdle(null); return; }
+        ai.navTarget = null;
 
         aimAt(tgt.mesh.position);
 
@@ -417,21 +620,15 @@ const NEXUS = (() => {
         const ux = dx / len, uz = dz / len;
         const sv = strafeVec(ux, uz);
 
-        moveWorld(-ux * 0.6 + sv.x * 0.8, -uz * 0.6 + sv.z * 0.8);
+        const fd = freeDir(-ux * 0.6 + sv.x * 0.8, -uz * 0.6 + sv.z * 0.8);
+        moveWorld(fd.x, fd.z);
 
         if (hasLineOfSight(player.position, tgt.mesh.position) && ammo > 0 && !isReloading) shoot();
     }
 
     function doSeekDrop(dp, tgt) {
         if (!dp || !dp.mesh) { ai.phase = 'HUNT'; return; }
-
-        if (tgt) {
-            aimAt(tgt.mesh.position);
-            const los = hasLineOfSight(player.position, tgt.mesh.position);
-            if (los && player.position.distanceTo(tgt.mesh.position) < 35 && ammo > 0 && !isReloading) shoot();
-        } else {
-            aimAt(dp.mesh.position);
-        }
+        ai.navTarget = null;
 
         const dx   = dp.mesh.position.x - player.position.x;
         const dz   = dp.mesh.position.z - player.position.z;
@@ -443,19 +640,29 @@ const NEXUS = (() => {
             return;
         }
 
-        moveWorld(dx / dist, dz / dist);
+        const nd = navDir(dp.mesh.position.x, dp.mesh.position.z) || { x: dx, z: dz };
+
+        if (tgt && hasLineOfSight(player.position, tgt.mesh.position)) {
+            aimAt(tgt.mesh.position);
+            if (player.position.distanceTo(tgt.mesh.position) < 35 && ammo > 0 && !isReloading) shoot();
+        } else if (nd.direct) {
+            aimAt(dp.mesh.position);
+        } else {
+            lookAlong(nd);
+        }
+
+        moveWorld(nd.x, nd.z);
     }
 
     function doEvadeBomber(bomber, tgt) {
         if (!bomber || !bomber.mesh) { ai.phase = 'HUNT'; return; }
+        ai.navTarget = null;
 
         aimAt(bomber.mesh.position);
         if (hasLineOfSight(player.position, bomber.mesh.position) && ammo > 0 && !isReloading) shoot();
 
-        const dx  = player.position.x - bomber.mesh.position.x;
-        const dz  = player.position.z - bomber.mesh.position.z;
-        const len = Math.sqrt(dx*dx + dz*dz) || 1;
-        moveWorld(dx / len, dz / len);
+        const fd = freeDir(player.position.x - bomber.mesh.position.x, player.position.z - bomber.mesh.position.z);
+        moveWorld(fd.x, fd.z);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -483,8 +690,6 @@ const NEXUS = (() => {
         }
         ai.lastHp = hp;
 
-        checkStuck();
-
         const tgt = getBestTarget();
         const dp  = getBestDrop();
 
@@ -498,6 +703,12 @@ const NEXUS = (() => {
             log(`→ ${newPhase}${tgt ? ' [' + (tgt.isBoss ? 'BOSS' : tgt.name) + ']' : ''} hp:${Math.ceil(hp)}`);
             ai.phase = newPhase;
         }
+
+        // Travelling phases are the ones that can get wedged (HUNT while the target is hidden or far)
+        const wantsTravel = ai.phase === 'SEEK_DROP' || ai.phase === 'KITE' || ai.phase === 'EVADE_BOMBER' ||
+            (ai.phase === 'HUNT' && tgt && (!hasLineOfSight(player.position, tgt.mesh.position) ||
+                player.position.distanceTo(tgt.mesh.position) > (PREF[(tgt.name || '').toLowerCase()] || 18) + 6));
+        checkStuck(wantsTravel);
 
         switch (ai.phase) {
             case 'IDLE':         doIdle(dp);                       break;
@@ -634,7 +845,7 @@ const NEXUS = (() => {
         ai.lastHp    = hp;
         ai.phase     = 'IDLE';
         ai.lastPos   = null;
-        ai.stuckTicks = 0;
+        ai.stuckTicks = 0; resetNav();
         ai.log       = [];
 
         log(`RUN ${trainRunCount} START — streak: ${mem.bestWave} best`);
@@ -722,7 +933,7 @@ const NEXUS = (() => {
             ai.lastHp = hp || 100;
             ai.phase  = 'IDLE';
             ai.lastPos = null;
-            ai.stuckTicks = 0;
+            ai.stuckTicks = 0; resetNav();
             rafId = requestAnimationFrame(frame);
         }
 
@@ -797,7 +1008,7 @@ const NEXUS = (() => {
         ai.lastHp    = hp || 100;
         ai.phase     = 'IDLE';
         ai.lastPos   = null;
-        ai.stuckTicks = 0;
+        ai.stuckTicks = 0; resetNav();
         patchPointerLock();
         rafId = requestAnimationFrame(frame);
         const btn = document.getElementById('nexus-btn');
@@ -1507,6 +1718,7 @@ ${sparkline}
         enable, disable,
         startTraining, stopTraining,
         get on()       { return active; },
+        _dbg() { return { unstucks: ai.unstucks || 0, path: nav.path ? nav.path.length : 0 }; },
         get isTraining(){ return training; },
         get mem()      { return mem; },
         get history()  { return trainHistory; },
