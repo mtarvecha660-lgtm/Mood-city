@@ -228,7 +228,7 @@ const CODEX_DATA = {
 // uses (Toon.makeOperative / makeEnemy / makeDrop) on a warm sand pedestal.
 // Palette per operative; every threat is coral, like in the game.
 const CODEX_HEX = { striker: '#7cc3d6', enforcer: '#c6a2f0', phantom: '#ffc857', medic: '#7fd6a4',
-    hp: '#7fd6a4', ammo: '#7cc3d6', speed: '#c6a2f0', shield: '#9fd0ff', rapid: '#ffb36b', overclock: '#fff4e2', secondary: '#ffc857' };
+    hp: '#f2545b', ammo: '#e9a93f', speed: '#b98cf0', shield: '#8cc8f5', rapid: '#ff9f4a', overclock: '#ffd25e', secondary: '#d9925f' };
 Object.keys(CODEX_DATA).forEach(tab => CODEX_DATA[tab].forEach(item => {
     item.hex = tab === 'threats' ? '#ff5a3c' : (CODEX_HEX[item.id] || '#fff4e2');
     item.color = parseInt(item.hex.slice(1), 16);
@@ -299,12 +299,16 @@ function setPreviewModel(tab, item) {
     else if (tab === 'threats') {
         const [kind, sz] = THREAT_KIND[item.id] || ['runner', 1.2];
         m = Toon.makeEnemy(kind, sz);
-    } else m = Toon.makeDrop(item.id);
+    } else {
+        m = Toon.makeDrop(item.id);
+        const dd = m.userData.drop;            // ring sits just under the pickup on the pedestal
+        if (dd) { dd.ring.position.y = -0.48; m.children.forEach(c => { if (c !== dd.spin && c !== dd.ring) c.position.y = -0.49; }); }
+    }
     const holder = new THREE.Group();
     holder.add(m);
     // sit the model on the pedestal
     const box = new THREE.Box3().setFromObject(m);
-    m.position.y -= box.min.y;
+    m.position.y -= box.min.y - 0.02;   // tiny lift: feet/ring never share the pedestal's top face (z-fighting)
     previewMesh = holder;
     previewMesh.rotation.y = -0.5;
     previewScene.add(previewMesh);
@@ -313,7 +317,11 @@ function setPreviewModel(tab, item) {
 
 function animatePreview() {
     previewAnimId = requestAnimationFrame(animatePreview);
-    if (previewMesh) previewMesh.rotation.y += 0.01;
+    if (previewMesh) {
+        previewMesh.rotation.y += 0.01;
+        const dm = previewMesh.children[0];
+        if (dm && dm.userData.drop) Toon.animateDrop(dm, performance.now());
+    }
     if (previewRenderer && previewScene && previewCamera)
         previewRenderer.render(previewScene, previewCamera);
 }
@@ -445,6 +453,7 @@ function setDifficulty(mode) {
 // ── Achievement system ──
 
 function unlockAchievement(id) {
+    if (aiAssistedRun) return;            // the AI can't unlock things for you
     if (unlockedAchievements.includes(id)) return;
     const def = ACHIEVEMENT_DEFS.find(d => d.id === id);
     if (!def) return;
@@ -474,7 +483,7 @@ function checkAchievements() {
 
 function addKillFeedEntry(text, color) {
     killFeedEntries.push({ text, color, expires: Date.now() + 2500, opacity: 1 });
-    if (killFeedEntries.length > 6) killFeedEntries.shift();
+    if (killFeedEntries.length > (isMobile ? 3 : 5)) killFeedEntries.shift();
 }
 
 function renderKillFeed() {
@@ -679,7 +688,7 @@ function applyPowerup(type) {
     boosts[type] = Date.now() + (durations[type] || 5000);
     const el = document.getElementById('boost-' + type);
     if (el) el.style.display = 'inline-block';
-    const colors = { speed: '255,0,255', shield: '0,136,255', rapid: '255,136,0', overclock: '255,255,255' };
+    const colors = { speed: '185,140,240', shield: '140,200,245', rapid: '255,159,74', overclock: '255,210,94' };
     const col = colors[type] || '255,255,255';
     const dmgEl = document.getElementById('damage-overlay');
     dmgEl.style.boxShadow = `inset 0 0 120px 60px rgba(${col},0.4)`;
@@ -923,12 +932,12 @@ function drawMinimap() {
         let bw = (b.maxX - b.minX) * scale, bh = (b.maxZ - b.minZ) * scale;
         ctx.fillRect(bx - bw / 2, by - bh / 2, bw, bh);
     }
-    const pCol = { speed: '#c6a2f0', shield: '#9fd0ff', rapid: '#ffb36b', overclock: '#fff4e2' };
+    const pCol = { speed: '#b98cf0', shield: '#8cc8f5', rapid: '#ff9f4a', overclock: '#ffd25e' };
     for (let d of drops) {
         let dx = cx + (d.mesh.position.x - player.position.x) * scale;
         let dy = cy + (d.mesh.position.z - player.position.z) * scale;
-        ctx.fillStyle = d.type === 'hp' ? '#7fd6a4' : d.type === 'ammo' ? '#7cc3d6'
-            : d.type === 'secondary' ? '#ffc857' : (pCol[d.powerup] || '#fff');
+        ctx.fillStyle = d.type === 'hp' ? '#f2545b' : d.type === 'ammo' ? '#e9a93f'
+            : d.type === 'secondary' ? '#d9925f' : (pCol[d.powerup] || '#fff');
         ctx.beginPath(); ctx.arc(dx, dy, 3, 0, Math.PI * 2); ctx.fill();
     }
     ctx.fillStyle = '#ff4a2a';
@@ -1215,8 +1224,10 @@ function animate() {
 
             // Kill tracking
             killCount++;
-            totalEnemiesKilled++;
-            localStorage.setItem('msc_total_kills', totalEnemiesKilled);
+            if (!aiAssistedRun) {
+                totalEnemiesKilled++;
+                localStorage.setItem('msc_total_kills', totalEnemiesKilled);
+            }
 
             checkAchievements();
 
@@ -1233,10 +1244,7 @@ function animate() {
                 isBossWave = false;
                 const bossBarWrapper = document.getElementById('boss-bar-wrapper');
                 if (bossBarWrapper) bossBarWrapper.style.display = 'none';
-                const banner = document.getElementById('wave-bonus');
-                banner.innerText = '// OVERLORD ELIMINATED //';
-                banner.style.opacity = '1';
-                setTimeout(() => { banner.style.opacity = '0'; }, 3000);
+                // (BOSS DOWN is shown by the single callout card; no second banner)
             } else if (Math.random() < Juice.dropChance()) {
                 spawnDrop(e.mesh.position);
             }
@@ -1410,8 +1418,7 @@ function animate() {
     // Drops
     for (let i = drops.length - 1; i >= 0; i--) {
         let d = drops[i];
-        d.mesh.rotation.y += 0.08;
-        d.mesh.position.y = 0.8 + Math.sin(nowMs * 0.005) * 0.2;
+        Toon.animateDrop(d.mesh, nowMs);
         const dd = player.position.distanceTo(d.mesh.position);
         if (dd < Juice.pickupRadius() * 2.5 && dd > 1.0) {      // gentle pull towards the player
             d.mesh.position.x += (player.position.x - d.mesh.position.x) * 0.04;
@@ -1440,16 +1447,19 @@ function animate() {
 function triggerGameOver() {
     gameRunning = false;
 
+    // AI-played runs ("AI plays for me" / "AI practice") earn nothing: no XP,
+    // levels, unlocks or high score. Only the player's own runs count.
+    const aiRun = aiAssistedRun;
     // High score
     const prevBest = highScore;
-    const isBest = score > highScore;
+    const isBest = !aiRun && score > highScore;
     if (isBest) {
         highScore = score;
         localStorage.setItem('msc_highscore', highScore);
     }
 
     // XP calculation (same formula as before, plus a streak bonus)
-    const xpEarned = Math.max(0, Math.floor(score / 8) + killCount * 2 + (wave - 1) * 40 + (Juice.run.bestStreak || 0) * 5);
+    const xpEarned = aiRun ? 0 : Math.max(0, Math.floor(score / 8) + killCount * 2 + (wave - 1) * 40 + (Juice.run.bestStreak || 0) * 5);
     const oldXP    = playerXP;
     const oldRank  = getPlayerRank(playerXP);
     playerXP      += xpEarned;
@@ -1463,7 +1473,7 @@ function triggerGameOver() {
 
     Juice.showGameOver({
         score, best: highScore, prevBest, isBest, wave, kills: killCount, acc, time: timeStr,
-        xp: xpEarned, oldXP, newXP: playerXP, rank: newRank.name
+        xp: xpEarned, oldXP, newXP: playerXP, rank: newRank.name, aiRun
     });
     updateMenuRankDisplay();
 }
@@ -1625,7 +1635,7 @@ function resumeGame() {
 // fullscreen (browsers only allow re-entering on a fresh tap), which is why the
 // game kept dropping out of fullscreen after ABORT / MENU.
 function exitToMenu() {
-    if (score > highScore) { highScore = score; localStorage.setItem('msc_highscore', highScore); }
+    if (!aiAssistedRun && score > highScore) { highScore = score; localStorage.setItem('msc_highscore', highScore); }
     if (typeof NEXUS !== 'undefined') { if (NEXUS.isTraining) NEXUS.stopTraining(); if (NEXUS.on) NEXUS.disable(); }
     gameRunning = false; gamePaused = false; tutorialMode = false;
     if (typeof Juice !== 'undefined') { Juice.onPause(true); Juice.run.firing = false; }

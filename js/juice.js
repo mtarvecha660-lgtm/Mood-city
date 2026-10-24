@@ -73,6 +73,8 @@ const Juice = (() => {
     // ─────────────────────────── PER-RUN STATE ───────────────────────────
     const run = {};
     function resetRun() {
+        clearCallouts();
+        aiAssistedRun = typeof NEXUS !== 'undefined' && !!(NEXUS.on || NEXUS.isTraining);
         Object.assign(run, {
             headMult: 2, pickup: 2.0, comboWin: 2600, vamp: 0, drop: 0.5, twin: false,
             perks: {}, bestStreak: 0, streak: 0, comboExpire: 0, headshots: 0,
@@ -204,8 +206,18 @@ const Juice = (() => {
         if (_v.z > 1) return null;
         return { x: (_v.x + 1) / 2 * window.innerWidth, y: (1 - _v.y) / 2 * window.innerHeight };
     }
+    // The callout card owns a fixed band near the top-centre of the screen;
+    // damage numbers and +score pops that would rise into it start below it.
+    function belowCalloutBand(x, y) {
+        const el = $('callout'); if (!el) return y;
+        const cy = parseFloat(getComputedStyle(el).top) || innerHeight * 0.3;
+        const half = innerHeight < 520 ? 48 : 62, halfW = Math.min(innerWidth * 0.36, 300);
+        if (Math.abs(x - innerWidth / 2) < halfW && y > cy - half - 10 && y < cy + half + 55) return cy + half + 55;
+        return y;
+    }
     function dmgNumber(pos, dmg, head) {
         const p = toScreen(pos); if (!p) return;
+        p.y = belowCalloutBand(p.x, p.y - 20) + 20;
         const layer = $('feedback-layer'); if (!layer) return;
         if (layer.childElementCount > 24) layer.firstElementChild.remove();
         const el = document.createElement('div');
@@ -217,27 +229,78 @@ const Juice = (() => {
         layer.appendChild(el);
         setTimeout(() => el.remove(), 750);
     }
+    // +score pops stack upward instead of piling on one spot when several
+    // enemies die together, and sit above the damage numbers.
+    const pops = [];
     function scorePop(pos, pts, mult) {
         const p = toScreen(pos) || { x: innerWidth / 2, y: innerHeight / 2 - 60 };
         const layer = $('feedback-layer'); if (!layer) return;
+        const now = performance.now();
+        for (let i = pops.length - 1; i >= 0; i--) if (pops[i].until < now) pops.splice(i, 1);
+        const ws = $('wave-status'), wsBox = ws && ws.offsetParent ? (ws.parentElement || ws) : null, topY = (wsBox ? wsBox.getBoundingClientRect().bottom : 40) + 40;
+        const x = Math.max(50, Math.min(innerWidth - 50, p.x));
+        const free = y => !pops.some(q => Math.abs(q.x - x) < 90 && Math.abs(q.y - y) < 30);
+        // first free slot: stack upward while there is room under the top HUD
+        // and outside the callout band, otherwise downward
+        const base = p.y - 74, okY = y => y >= topY && belowCalloutBand(x, y) === y && free(y);
+        let y = null;
+        for (const dy of [0, -32, -64, 32, 64, 96, 128, 160]) if (okY(base + dy)) { y = base + dy; break; }
+        if (y === null) { y = belowCalloutBand(x, Math.max(topY, base)); while (!free(y) && y < innerHeight - 60) y += 32; }
+        pops.push({ x, y, until: now + 650 });
         const el = document.createElement('div');
         el.className = 'score-pop';
         el.innerHTML = '+' + pts + (mult > 1 ? ' <small>x' + mult + '</small>' : '');
-        el.style.left = p.x + 'px'; el.style.top = (p.y - 50) + 'px';
+        el.style.left = x + 'px'; el.style.top = y + 'px';
         layer.appendChild(el);
         setTimeout(() => el.remove(), 1000);
     }
-    let calloutTimer = null, calloutPri = 0;
+
+    // ── Callouts: one card on screen at a time ──
+    // Events that fire on the same shot (DOUBLE KILL + HEADSHOT + STREAK) are
+    // merged into one card: the biggest is the headline, the rest ride as small
+    // tags under it. Events that arrive while a card is up wait in a short queue
+    // (or replace it if they are bigger), so callouts never draw on top of each other.
+    const coQ = []; let coCur = null, coShownAt = 0, coTimer = null, coBatch = null;
     function callout(text, sub, pri = 1, cls = '') {
+        if (!coBatch) { coBatch = []; setTimeout(flushCallouts, 40); }
+        coBatch.push({ text, sub, pri, cls, t: performance.now(), tags: [] });
+    }
+    function flushCallouts() {
+        const b = coBatch; coBatch = null; if (!b || !b.length) return;
+        b.sort((a, c) => c.pri - a.pri);
+        const head = b[0];
+        head.tags = b.slice(1).map(x => x.text).filter(t => t !== head.text).slice(0, 2);
+        if (!coCur) { showCallout(head); return; }
+        if (head.pri > coCur.pri && performance.now() - coShownAt > 220) {
+            if (head.tags.length < 2 && coCur.text !== head.text) head.tags.push(coCur.text);
+            showCallout(head); return;
+        }
+        if (coCur.text === head.text || coQ.some(q => q.text === head.text)) return;
+        coQ.push(head);
+        coQ.sort((a, c) => c.pri - a.pri);
+        if (coQ.length > 2) coQ.length = 2;
+    }
+    function showCallout(it) {
         const el = $('callout'); if (!el) return;
-        if (pri < calloutPri && el.classList.contains('show')) return;
-        calloutPri = pri;
-        el.className = cls;
-        el.innerHTML = `<div class="co-main">${text}</div>` + (sub ? `<div class="co-sub">${sub}</div>` : '');
+        coCur = it; coShownAt = performance.now();
+        el.className = it.cls;
+        el.innerHTML = `<div class="co-main">${it.text}</div>` + (it.sub ? `<div class="co-sub">${it.sub}</div>` : '') +
+            (it.tags.length ? `<div class="co-tags">${it.tags.map(t => `<span>${t}</span>`).join('')}</div>` : '');
         void el.offsetWidth;
         el.classList.add('show');
-        clearTimeout(calloutTimer);
-        calloutTimer = setTimeout(() => { el.classList.remove('show'); calloutPri = 0; }, pri >= 3 ? 1600 : 1100);
+        clearTimeout(coTimer);
+        coTimer = setTimeout(nextCallout, it.pri >= 4 ? 1150 : it.pri >= 3 ? 1000 : it.pri >= 2 ? 850 : 650);
+    }
+    function nextCallout() {
+        const el = $('callout'); if (el) el.classList.remove('show');
+        coCur = null;
+        const now = performance.now();
+        for (let i = coQ.length - 1; i >= 0; i--) if (now - coQ[i].t > 2200) coQ.splice(i, 1);   // stale news is dropped
+        if (coQ.length) coTimer = setTimeout(() => { if (!coCur && coQ.length) showCallout(coQ.shift()); }, 140);
+    }
+    function clearCallouts() {
+        coQ.length = 0; coBatch = null; coCur = null; clearTimeout(coTimer); pops.length = 0;
+        const el = $('callout'); if (el) el.classList.remove('show');
     }
     function bumpScore() {
         const el = $('score-val'); if (!el) return;
@@ -294,7 +357,7 @@ const Juice = (() => {
         else if (n > 15 && n % 5 === 0) { callout('STREAK x' + n, 'x' + comboMultiplier + ' combo', 3, 'gold'); sfx.streak(); }
         else if (e._headKill) callout('HEADSHOT', null, 1, 'small');
 
-        if (!run.beatBest && run.startBest > 0 && score > run.startBest) {
+        if (!aiAssistedRun && !run.beatBest && run.startBest > 0 && score > run.startBest) {
             run.beatBest = true;
             setTimeout(() => { callout('NEW HIGH SCORE', 'keep going', 5, 'gold'); sfx.best(); }, 350);
         }
@@ -404,7 +467,7 @@ const Juice = (() => {
         const pctNow = Math.min(100, (d.newXP - lvlStart) / (lvlEnd - lvlStart) * 100);
         const pctOld = newL > oldL ? 0 : Math.min(100, (d.oldXP - lvlStart) / (lvlEnd - lvlStart) * 100);
         const short = (!d.isBest && d.prevBest > 0) ? d.prevBest - d.score : 0;
-        const tease = d.isBest ? 'NEW PERSONAL BEST' :
+        const tease = d.aiRun ? 'the AI played this run' : d.isBest ? 'NEW PERSONAL BEST' :
             (short > 0 && short <= Math.max(300, d.prevBest * 0.25)) ? `only ${short.toLocaleString()} short of your best` :
             nu ? `${(xpForLevel(nu.lvl) - d.newXP).toLocaleString()} XP to unlock ${nu.what}` : 'max level. legend.';
         const perkList = Object.keys(run.perks).map(k => `<span class="go-perk">${PERKS[k].icon} ${PERKS[k].name}${run.perks[k] > 1 ? ' x' + run.perks[k] : ''}</span>`).join('');
@@ -424,10 +487,11 @@ const Juice = (() => {
             </div>
             ${perkList ? `<div class="go-perks">${perkList}</div>` : ''}
             <div class="go-xp">
-              <div class="go-xp-top"><span>LVL <b id="go-lvl">${newL > oldL ? oldL : newL}</b> · ${d.rank}</span><span>+${d.xp} XP</span></div>
+              <div class="go-xp-top"><span>LVL <b id="go-lvl">${newL > oldL ? oldL : newL}</b> · ${d.rank}</span><span>${d.aiRun ? '0 XP' : '+' + d.xp + ' XP'}</span></div>
               <div class="go-xp-track"><div class="go-xp-fill" id="go-xp-fill" style="width:${pctOld}%"></div></div>
               <div class="go-unlock" id="go-unlock"></div>
             </div>
+            ${d.aiRun ? '<div class="go-ai-note">🤖 AI RUN · NO XP</div>' : ''}
             <button id="go-again" class="go-again">▶ PLAY AGAIN</button>
             <button id="go-menu" class="go-menu">MENU</button>
             <div class="go-hint">${isMobile ? '' : 'SPACE to play again'}</div>
@@ -531,5 +595,5 @@ const Juice = (() => {
 
     return { onShoot, onHit, onKill, onWaveStart, onWaveCleared, onPlayerHit, onRunStart, onPause, update,
              showGameOver, restartRun, dropChance, pickupRadius, extraShots, cycleSkin, renderMenuProgress,
-             toggleMute, levelFor, xpForLevel, get picking() { return picking; }, sfx, run };
+             toggleMute, levelFor, xpForLevel, callout, get picking() { return picking; }, sfx, run };
 })();

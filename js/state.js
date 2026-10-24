@@ -53,6 +53,9 @@ let buildingLights = [];
 
 // High score
 let highScore = parseInt(localStorage.getItem('msc_highscore') || '0');
+// True once the AI has played any part of the current run ("AI plays for me" or
+// "AI practice"). Such runs earn no XP, levels, unlocks, achievements or high score.
+let aiAssistedRun = false;
 
 // ── Character build ──
 let selectedChar  = (() => { try { const v = localStorage.getItem('msc_operative'); return ['striker','enforcer','phantom','medic'].includes(v) ? v : 'striker'; } catch (e) { return 'striker'; } })();

@@ -466,6 +466,7 @@ const NEXUS = (() => {
         rafId = requestAnimationFrame(frame);
 
         if (!gameRunning || gamePaused || !player || hp <= 0) return;
+        aiAssistedRun = true;   // the AI touched this run: it earns no XP / high score
 
         // Auto-reload
         if (ammo <= 2 && reserve > 0 && !isReloading) reload();
@@ -664,11 +665,8 @@ const NEXUS = (() => {
             const acc     = shotsFired > 0 ? Math.round(shotsHit / shotsFired * 100) : 0;
             const elapsed = Math.round((Date.now() - runStartTime) / 1000);
 
-            // Update persistent memory
-            if (s > highScore) { highScore = s; localStorage.setItem('msc_highscore', highScore); }
-            const xpEarned = Math.floor(s / 8) + k * 2 + (w - 1) * 40;
-            playerXP += Math.max(0, xpEarned);
-            localStorage.setItem('msc_xp', playerXP);
+            // AI practice runs never touch the player's high score, XP or unlocks.
+            aiAssistedRun = true;
 
             mem.totalRuns++;
             trainRunCount++;
@@ -695,6 +693,7 @@ const NEXUS = (() => {
     function startTraining() {
         if (training) return;
         training      = true;
+        aiAssistedRun = true;
         trainRunCount = 0;
         trainHistory  = [];
         trainStartTime = Date.now();
