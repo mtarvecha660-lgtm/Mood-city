@@ -508,6 +508,27 @@ function isPositionInBuilding(x, z, radius) {
     return false;
 }
 
+// Enemy movement with wall sliding. Enemies used to walk straight at their
+// target and simply stop when a building was in the way, so one could sit
+// wedged behind a building for the rest of the wave ("HOSTILES: 1" that
+// nobody, human or AI, could reach). Blocked head-on, they now slide along
+// the wall (keeping the same side until they're past it).
+function enemyStep(e, mx, mz) {
+    const p = e.mesh.position, r = e.size / 2, ox = p.x, oz = p.z;
+    p.x += mx; if (checkCollision(p, r)) p.x -= mx;
+    p.z += mz; if (checkCollision(p, r)) p.z -= mz;
+    const want = Math.hypot(mx, mz);
+    if (want < 1e-5 || Math.hypot(p.x - ox, p.z - oz) > want * 0.35) return;
+    const now = Date.now();
+    if (!e.slideSide || now > (e.slideUntil || 0)) e.slideSide = Math.random() < 0.5 ? 1 : -1;
+    const ax = p.x, az = p.z;
+    for (const side of [e.slideSide, -e.slideSide]) {
+        p.x = ox - mz * side; p.z = oz + mx * side;
+        if (!checkCollision(p, r)) { e.slideSide = side; e.slideUntil = now + 1200; return; }
+    }
+    p.x = ax; p.z = az;
+}
+
 function checkCollision(pos, radius) {
     for (let b of buildings) {
         if (pos.x + radius > b.minX && pos.x - radius < b.maxX &&
@@ -879,10 +900,14 @@ function spawnEnemy(isBoss) {
 
     if (isBoss) {
         const bossHp = 1500 + (wave - 5) * 200;
-        const angle  = Math.random() * Math.PI * 2;
-        const dist   = 35;
-        ex = _sa.x + Math.cos(angle) * dist;
-        ez = _sa.z + Math.sin(angle) * dist;
+        // keep the boss out of the buildings (it could spawn inside one and never come out)
+        do {
+            const angle  = Math.random() * Math.PI * 2;
+            const dist   = 35 + attempts * 1.5;
+            ex = _sa.x + Math.cos(angle) * dist;
+            ez = _sa.z + Math.sin(angle) * dist;
+            attempts++;
+        } while (isPositionInBuilding(ex, ez, 2.6) && attempts < 30);
 
         const mesh = Toon.makeEnemy('boss', 4.0);
         mesh.position.set(ex, 3.6, ez);
@@ -933,7 +958,7 @@ function spawnEnemy(isBoss) {
         ex = _sa.x + Math.cos(angle) * dist;
         ez = _sa.z + Math.sin(angle) * dist;
         attempts++;
-    } while (isPositionInBuilding(ex, ez, type.size / 2 + 0.5) && attempts < 15);
+    } while (isPositionInBuilding(ex, ez, type.size / 2 + 0.5) && attempts < 40);
 
     let mesh = Toon.makeEnemy(type.name, type.size);
     mesh.position.set(ex, type.size * 0.9, ez);
@@ -1435,8 +1460,7 @@ function animate() {
                 e.mesh.material.emissiveIntensity = 0.8 + Math.sin(nowMs * 0.015) * 0.7;
             }
             let moveX = toP.x * e.speed, moveZ = toP.z * e.speed;
-            e.mesh.position.x += moveX; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.x -= moveX;
-            e.mesh.position.z += moveZ; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.z -= moveZ;
+            enemyStep(e, moveX, moveZ);
             e.mesh.lookAt(_tp.x, e.mesh.position.y, _tp.z);
             continue;
         }
@@ -1461,8 +1485,7 @@ function animate() {
                     e.nextStrafeChange = Date.now() + 1200 + Math.random() * 800;
                 }
             }
-            e.mesh.position.x += moveX; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.x -= moveX;
-            e.mesh.position.z += moveZ; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.z -= moveZ;
+            enemyStep(e, moveX, moveZ);
             e.mesh.lookAt(_tp.x, e.mesh.position.y, _tp.z);
 
             // Melee (500ms cooldown to avoid per-frame damage)
@@ -1505,8 +1528,7 @@ function animate() {
                         : distToPlayer > e.preferredDist + 3 ? toP.clone()
                         : new THREE.Vector3(-toP.z, 0, toP.x);
             let moveX = moveDir.x * e.speed, moveZ = moveDir.z * e.speed;
-            e.mesh.position.x += moveX; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.x -= moveX;
-            e.mesh.position.z += moveZ; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.z -= moveZ;
+            enemyStep(e, moveX, moveZ);
             e.mesh.lookAt(_tp.x, e.mesh.position.y, _tp.z);
 
             let losBlocked = false;
@@ -1545,8 +1567,7 @@ function animate() {
         let sV = new THREE.Vector3(-toP.z, 0, toP.x);
         let moveX = (toP.x * e.speed) + (sV.x * e.strafeDir * e.speed * 0.4);
         let moveZ = (toP.z * e.speed) + (sV.z * e.strafeDir * e.speed * 0.4);
-        e.mesh.position.x += moveX; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.x -= moveX;
-        e.mesh.position.z += moveZ; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.z -= moveZ;
+        enemyStep(e, moveX, moveZ);
         if (Date.now() > e.nextStrafeChange) {
             e.strafeDir *= -1;
             e.nextStrafeChange = Date.now() + 1000 + Math.random() * 1000;
