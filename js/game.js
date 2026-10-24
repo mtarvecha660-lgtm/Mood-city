@@ -555,7 +555,7 @@ function init() {
 
     // Golden Hour Toon world: sky, light, shadows, buildings, FX pools, gun viewmodel
     buildingLights = [];
-    Toon.buildWorld();
+    if (window.Coop && Coop.active) Coop.withSeed(() => Toon.buildWorld()); else Toon.buildWorld();
 
     player = new THREE.Object3D();
     player.position.set(0, 1.8, 0);
@@ -579,6 +579,7 @@ function aimDir(spread) {
 
 function shoot() {
     if (!gameRunning || gamePaused) return;
+    if ((window.Coop && Coop.active) && !Coop.canAct()) return;
     if (meleeActive) { swingMelee(); return; }
     if (ammo <= 0 && reserve <= 0 && !isReloading) { setMelee(true, true); return; }
     if (ammo <= 0 && reserve > 0 && !isReloading) { reload(); return; }
@@ -613,6 +614,7 @@ function shoot() {
         bullets.push({ mesh: bullet, pos, off: muzzleOff.clone(), dir, dist: 0, dmg: activeDmg });
         scene.add(bullet);
     }
+    if (window.Coop && Coop.active) Coop.onLocalShot(eye, spreads.map(s => aimDir(s)), hot);
 }
 
 // ── Melee (bat) ──
@@ -706,6 +708,7 @@ function showFloatingFeedback(text, type = 'score', screenX, screenY) {
 
 function fireSecondary() {
     if (!gameRunning || !hasSecondaryWeapon || secondaryAmmo <= 0) return;
+    if ((window.Coop && Coop.active) && !Coop.canAct()) return;
     secondaryAmmo--;
     if (secondaryAmmo <= 0) hasSecondaryWeapon = false;
     Sound.secondary();
@@ -847,7 +850,9 @@ function startWave(num) {
 
     let count = isBossWave ? 1 : (5 + num * 2);
     if (currentWaveModifier === 'swarm') count = Math.floor(count * 2);
+    if ((window.Coop && Coop.active) && !isBossWave) count = Coop.scaleCount(count);
     enemiesToSpawn = count;
+    if ((window.Coop && Coop.active)) Coop.onWaveStart(num);
 
     setTimeout(() => {
         if (!gameRunning || myRun !== runGen) return;
@@ -869,13 +874,14 @@ function startWave(num) {
 
 function spawnEnemy(isBoss) {
     let ex, ez, attempts = 0;
+    const _sa = (window.Coop && Coop.active) ? Coop.spawnAnchor() : player.position;
 
     if (isBoss) {
         const bossHp = 1500 + (wave - 5) * 200;
         const angle  = Math.random() * Math.PI * 2;
         const dist   = 35;
-        ex = player.position.x + Math.cos(angle) * dist;
-        ez = player.position.z + Math.sin(angle) * dist;
+        ex = _sa.x + Math.cos(angle) * dist;
+        ez = _sa.z + Math.sin(angle) * dist;
 
         const mesh = Toon.makeEnemy('boss', 4.0);
         mesh.position.set(ex, 3.6, ez);
@@ -888,6 +894,7 @@ function spawnEnemy(isBoss) {
             bulletRange: 80, preferredDist: 25, lastEnemyShot: Date.now() + 2000,
             hitFlash: 0, lastMeleeHit: 0
         });
+        if ((window.Coop && Coop.active)) Coop.onSpawn(enemies[enemies.length - 1]);
         return;
     }
 
@@ -922,8 +929,8 @@ function spawnEnemy(isBoss) {
     do {
         const angle = Math.random() * Math.PI * 2;
         const dist  = 30 + Math.random() * 25;
-        ex = player.position.x + Math.cos(angle) * dist;
-        ez = player.position.z + Math.sin(angle) * dist;
+        ex = _sa.x + Math.cos(angle) * dist;
+        ez = _sa.z + Math.sin(angle) * dist;
         attempts++;
     } while (isPositionInBuilding(ex, ez, type.size / 2 + 0.5) && attempts < 15);
 
@@ -944,6 +951,7 @@ function spawnEnemy(isBoss) {
         lastEnemyShot:  Date.now() + Math.random() * 2000,
         hitFlash: 0, lastMeleeHit: 0
     });
+    if ((window.Coop && Coop.active)) Coop.onSpawn(enemies[enemies.length - 1]);
 }
 
 // ── Drops ──
@@ -1059,6 +1067,7 @@ function drawMinimap() {
         ctx.fillStyle = '#ff5a3c';
         ctx.beginPath(); ctx.arc(ex, ey, e.isBoss ? 7 : 4, 0, Math.PI * 2); ctx.fill();
     }
+    if ((window.Coop && Coop.active)) Coop.drawMinimap(ctx, cx, cy, scale);
     if (boosts.shield && Date.now() < boosts.shield) {
         ctx.strokeStyle = '#9fd0ff'; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.stroke();
@@ -1178,7 +1187,7 @@ let _animating = false;
 function animate() {
     if (!gameRunning) { _animating = false; return; }
     if (gamePaused) { _animating = false; return; }
-    if (hp <= 0) {
+    if (hp <= 0 && !(window.Coop && Coop.active)) {
         _animating = false;
         triggerGameOver();
         return;
@@ -1203,6 +1212,7 @@ function animate() {
         mX = (fw.x * -joystick.y + rt.x * joystick.x) * sp;
         mZ = (fw.z * -joystick.y + rt.z * joystick.x) * sp;
     }
+    if ((window.Coop && Coop.active)) { Coop.preFrame(); if (Coop.downed) { mX = 0; mZ = 0; } }
     player.position.x += mX; if (checkCollision(player.position, pSize)) player.position.x -= mX;
     player.position.z += mZ; if (checkCollision(player.position, pSize)) player.position.z -= mZ;
 
@@ -1323,9 +1333,14 @@ function animate() {
         if (p.life <= 0) { p.active = false; p.mesh.visible = false; }
     });
 
-    // Enemy AI
-    for (let i = enemies.length - 1; i >= 0; i--) {
+    // Enemy AI (co-op clients only mirror the host's enemies: Coop.clientTick)
+    const _coopHost = (window.Coop && Coop.active) && Coop.isHost();
+    if ((window.Coop && Coop.active) && Coop.isClient()) Coop.clientTick();
+    else for (let i = enemies.length - 1; i >= 0; i--) {
         let e = enemies[i];
+        // co-op host: each enemy chases the nearest standing player
+        const _tg = _coopHost ? Coop.target(e) : null;
+        const _tp = _tg ? _tg.pos : player.position;
 
         // Hit flash
         if (e.hitFlash > 0) {
@@ -1346,11 +1361,12 @@ function animate() {
 
         if (e.hp <= 0) {
             // Scoring, combo, streak callouts, confetti, kill pop — see js/juice.js
-            const actualPts = Juice.onKill(e);
+            const _mine = !(window.Coop && Coop.active) || Coop.killedByMe(e);
+            const actualPts = _mine ? Juice.onKill(e) : Coop.otherKill(e);
 
             // Kill tracking
-            killCount++;
-            if (!aiAssistedRun) {
+            if (_mine) killCount++;
+            if (_mine && !aiAssistedRun) {
                 totalEnemiesKilled++;
                 localStorage.setItem('msc_total_kills', totalEnemiesKilled);
             }
@@ -1358,12 +1374,12 @@ function animate() {
             checkAchievements();
 
             // Kill feed
-            const feedName = e.isBoss ? 'OVERLORD' : (e.name || 'ENEMY');
-            addKillFeedEntry(`${e._meleeKill ? '🏏 ' : e._headKill ? '◎ ' : ''}${feedName} <b>+${actualPts}</b>${comboMultiplier > 1 ? ' <i>x' + comboMultiplier + '</i>' : ''}`, '#fff4e2');
+            const feedName = (_mine ? '' : Coop.killerName(e) + ' › ') + (e.isBoss ? 'OVERLORD' : (e.name || 'ENEMY'));
+            addKillFeedEntry(`${e._meleeKill ? '🏏 ' : e._headKill ? '◎ ' : ''}${feedName}${_mine ? ' <b>+' + actualPts + '</b>' + (comboMultiplier > 1 ? ' <i>x' + comboMultiplier + '</i>' : '') : ''}`, '#fff4e2');
 
             // Drops
             if (e.isBoss) {
-                unlockAchievement('boss_slayer');
+                if (_mine) unlockAchievement('boss_slayer');
                 spawnDrop(e.mesh.position, true);
                 spawnDrop(e.mesh.position, true);
                 spawnDrop(e.mesh.position, false);
@@ -1380,26 +1396,28 @@ function animate() {
                 spawnAmmoDrop(e.mesh.position);   // extra ammo-only roll: pickups are more frequent
             }
 
+            if (_coopHost) Coop.enemyGone(e, 'kill');
             disposeMesh(e.mesh); enemies.splice(i, 1); continue;
         }
 
-        let distToPlayer = e.mesh.position.distanceTo(player.position);
+        let distToPlayer = e.mesh.position.distanceTo(_tp);
 
         // Teleport if out of range
         if (distToPlayer > 80 && !e.isBoss) {
             let a = Math.random() * Math.PI * 2;
-            e.mesh.position.x = player.position.x + Math.cos(a) * 30;
-            e.mesh.position.z = player.position.z + Math.sin(a) * 30;
+            e.mesh.position.x = _tp.x + Math.cos(a) * 30;
+            e.mesh.position.z = _tp.z + Math.sin(a) * 30;
             createImpact(e.mesh.position, 0xaa00ff, 15); continue;
         }
 
-        let toP = player.position.clone().sub(e.mesh.position).normalize();
+        let toP = _tp.clone().sub(e.mesh.position).normalize();
 
         // BOMBER behavior
         if (e.behavior === 'bomber') {
             if (distToPlayer < 2.5) {
                 Sound.bomberBoom();
-                if (!shielded) {
+                if (_tg && _tg.remote) Coop.hurtRemote(_tg, 60);
+                else if (!shielded) {
                     if (difficultyMode === 'ghost') {
                         hp = 0;
                     } else {
@@ -1409,6 +1427,7 @@ function animate() {
                     damageFlashAmount = 1.0; shakeAmount = 0.5; chromaAmount = 1.0;
                 }
                 createImpact(e.mesh.position, 0xff6600, 35);
+                if (_coopHost) Coop.enemyGone(e, 'boom');
                 disposeMesh(e.mesh); enemies.splice(i, 1); continue;
             }
             if (distToPlayer < 10) {
@@ -1417,7 +1436,7 @@ function animate() {
             let moveX = toP.x * e.speed, moveZ = toP.z * e.speed;
             e.mesh.position.x += moveX; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.x -= moveX;
             e.mesh.position.z += moveZ; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.z -= moveZ;
-            e.mesh.lookAt(player.position.x, e.mesh.position.y, player.position.z);
+            e.mesh.lookAt(_tp.x, e.mesh.position.y, _tp.z);
             continue;
         }
 
@@ -1443,16 +1462,17 @@ function animate() {
             }
             e.mesh.position.x += moveX; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.x -= moveX;
             e.mesh.position.z += moveZ; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.z -= moveZ;
-            e.mesh.lookAt(player.position.x, e.mesh.position.y, player.position.z);
+            e.mesh.lookAt(_tp.x, e.mesh.position.y, _tp.z);
 
             // Melee (500ms cooldown to avoid per-frame damage)
-            if (distToPlayer < 3.0 && !shielded) {
+            if (distToPlayer < 3.0 && ((_tg && _tg.remote) || !shielded)) {
                 if (!e.lastMeleeHit || Date.now() - e.lastMeleeHit > 500) {
                     e.lastMeleeHit = Date.now();
                     const meleeDmg = 15;
-                    if (difficultyMode === 'ghost') hp = 0;
+                    if (_tg && _tg.remote) Coop.hurtRemote(_tg, meleeDmg);
+                    else if (difficultyMode === 'ghost') hp = 0;
                     else { hp -= meleeDmg; waveDamageTaken += meleeDmg; }
-                    shakeAmount = 0.2; chromaAmount = 0.8; Sound.hit();
+                    if (!(_tg && _tg.remote)) { shakeAmount = 0.2; chromaAmount = 0.8; Sound.hit(); }
                 }
             }
 
@@ -1464,7 +1484,7 @@ function animate() {
                     const eBullet = Toon.makeEnemyBullet(true);
                     eBullet.position.copy(e.mesh.position);
                     eBullet.position.y = e.mesh.position.y + 1.5; // eye-level (boss center is at 3.6)
-                    const eDir = player.position.clone().sub(eBullet.position).normalize();
+                    const eDir = _tp.clone().sub(eBullet.position).normalize();
                     const rotDir = new THREE.Vector3(
                         eDir.x * Math.cos(sp) - eDir.z * Math.sin(sp),
                         eDir.y,
@@ -1472,6 +1492,7 @@ function animate() {
                     ).normalize();
                     enemyBullets.push({ mesh: eBullet, dir: rotDir, dist: 0, speed: 0.85, damage: 20, range: 80 });
                     scene.add(eBullet);
+                    if (_coopHost) Coop.ebSpawn(enemyBullets[enemyBullets.length - 1], true);
                 }
             }
             continue;
@@ -1485,12 +1506,12 @@ function animate() {
             let moveX = moveDir.x * e.speed, moveZ = moveDir.z * e.speed;
             e.mesh.position.x += moveX; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.x -= moveX;
             e.mesh.position.z += moveZ; if (checkCollision(e.mesh.position, e.size/2)) e.mesh.position.z -= moveZ;
-            e.mesh.lookAt(player.position.x, e.mesh.position.y, player.position.z);
+            e.mesh.lookAt(_tp.x, e.mesh.position.y, _tp.z);
 
             let losBlocked = false;
             if (distToPlayer <= e.bulletRange && Date.now() - e.lastEnemyShot > e.shootInterval) {
                 let steps = Math.ceil(distToPlayer / 1.5);
-                let losStep = player.position.clone().sub(e.mesh.position).divideScalar(steps);
+                let losStep = _tp.clone().sub(e.mesh.position).divideScalar(steps);
                 let probe   = e.mesh.position.clone();
                 for (let s = 1; s < steps; s++) {
                     probe.add(losStep);
@@ -1510,10 +1531,11 @@ function animate() {
                 let eBullet = Toon.makeEnemyBullet(false);
                 eBullet.position.copy(e.mesh.position);
                 eBullet.position.y = e.mesh.position.y + e.size * 0.4;
-                let eDir = player.position.clone().sub(eBullet.position).normalize();
+                let eDir = _tp.clone().sub(eBullet.position).normalize();
                 eBullet.position.addScaledVector(eDir, e.size / 2 + 0.8);
                 enemyBullets.push({ mesh: eBullet, dir: eDir, dist: 0, speed: e.bulletSpeed, damage: e.bulletDamage, range: e.bulletRange });
                 scene.add(eBullet);
+                if (_coopHost) Coop.ebSpawn(enemyBullets[enemyBullets.length - 1], false);
             }
             continue;
         }
@@ -1528,23 +1550,25 @@ function animate() {
             e.strafeDir *= -1;
             e.nextStrafeChange = Date.now() + 1000 + Math.random() * 1000;
         }
-        e.mesh.lookAt(player.position.x, e.mesh.position.y, player.position.z);
-        if (distToPlayer < 1.8 && !shielded) {
+        e.mesh.lookAt(_tp.x, e.mesh.position.y, _tp.z);
+        if (distToPlayer < 1.8 && ((_tg && _tg.remote) || !shielded)) {
             if (!e.lastMeleeHit || Date.now() - e.lastMeleeHit > 400) {
                 e.lastMeleeHit = Date.now();
                 const meleeDmg = 10;
-                if (difficultyMode === 'ghost') {
+                if (_tg && _tg.remote) Coop.hurtRemote(_tg, meleeDmg);
+                else if (difficultyMode === 'ghost') {
                     hp = 0;
                 } else {
                     hp -= meleeDmg;
                     waveDamageTaken += meleeDmg;
                 }
-                shakeAmount = 0.08; createImpact(player.position, 0xffffff, 2);
+                if (!(_tg && _tg.remote)) shakeAmount = 0.08;
+                createImpact(_tp, 0xffffff, 2);
             }
         }
     }
 
-    if (enemies.length === 0 && enemiesToSpawn === 0 && !isWaveTransition) Juice.onWaveCleared();
+    if (enemies.length === 0 && enemiesToSpawn === 0 && !isWaveTransition && !((window.Coop && Coop.active) && Coop.isClient())) Juice.onWaveCleared();
 
     ammoTick();
 
@@ -1565,10 +1589,12 @@ function animate() {
             else if (d.type === 'powerup')   applyPowerup(d.powerup);
             else if (d.type === 'secondary') { hasSecondaryWeapon = true; secondaryAmmo = 3; }
             createImpact(d.mesh.position, d.mesh.material.color.getHex(), 15);
+            if ((window.Coop && Coop.active)) Coop.onLocalPickup(d);
             disposeMesh(d.mesh); drops.splice(i, 1);
         }
     }
 
+    if ((window.Coop && Coop.active)) Coop.postFrame();
     Juice.update();
     updateUI();
     drawMinimap();
@@ -1619,6 +1645,12 @@ function startGame() {
         requestFullscreen();
         if (!isLandscape()) { updateOrientationOverlay(); return; }
     }
+    startGameCore();
+}
+
+// The run setup itself (co-op starts runs through here too: a joining phone that
+// is still in portrait gets the rotate overlay and the run resumes on rotation).
+function startGameCore() {
     if (audioCtx.state === 'suspended') audioCtx.resume();
 
     const c = CHARS[selectedChar];
@@ -1651,12 +1683,13 @@ function beginGame() {
         document.getElementById('mobile-controls').style.display = 'block';
     }
     init();
+    if ((window.Coop && Coop.active)) Coop.onRunInit();
     gameRunning = true;
     if (tutorialMode) {
         document.getElementById('wave-status').innerText = 'TRAINING';
         initTutorialPhases();
-    } else {
-        startWave(1);
+    } else if (!((window.Coop && Coop.active) && Coop.isClient())) {
+        startWave(1);   // co-op clients get their waves from the host
     }
     animate();
 }
@@ -1746,6 +1779,7 @@ function toggleGyroSetting() {
 
 function togglePause() {
     if (!gameRunning) return;
+    if ((window.Coop && Coop.active)) { Coop.toggleMenu(); return; }   // co-op never freezes the shared run
     gamePaused = !gamePaused;
     if (gamePaused) {
         document.exitPointerLock();
@@ -1769,6 +1803,7 @@ function resumeGame() {
 // fullscreen (browsers only allow re-entering on a fresh tap), which is why the
 // game kept dropping out of fullscreen after ABORT / MENU.
 function exitToMenu() {
+    if ((window.Coop && Coop.active)) Coop.leave();
     if (!aiAssistedRun && score > highScore) { highScore = score; localStorage.setItem('msc_highscore', highScore); }
     if (typeof NEXUS !== 'undefined') { if (NEXUS.isTraining) NEXUS.stopTraining(); if (NEXUS.on) NEXUS.disable(); }
     gameRunning = false; gamePaused = false; tutorialMode = false;
@@ -1797,6 +1832,7 @@ function exitToMenu() {
 }
 
 document.addEventListener('pointerlockchange', () => {
+    if ((window.Coop && Coop.active)) { if (!document.pointerLockElement && gameRunning && !Juice.picking) Coop.showMenu(); return; }
     if (!document.pointerLockElement && gameRunning && !gamePaused && !Juice.picking) {
         gamePaused = true;
         Juice.onPause(true);
