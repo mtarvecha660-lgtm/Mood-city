@@ -27,7 +27,7 @@ const AudioEngine = (() => {
         const vol = (typeof settings !== 'undefined' && settings.masterVolume != null)
             ? settings.masterVolume / 100
             : 0.8;
-        masterGain.gain.setValueAtTime(Math.max(0, Math.min(1, vol)), ctx.currentTime);
+        masterGain.gain.setValueAtTime(window.MSC_MUTED ? 0 : Math.max(0, Math.min(1, vol)), ctx.currentTime);
     }
 
     // Unlock on first user touch / key / click

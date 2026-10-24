@@ -148,6 +148,7 @@ function startTutorialRun() {
     bulletDmg = 50; maxClip = 12; ammo = 12; burstCount = 1;
     hp = 100; reserve = 48; boosts = {};
     document.getElementById('menu').style.display = 'none';
+    if (typeof Juice !== 'undefined') Juice.onRunStart();
     beginGame();
 }
 
@@ -207,10 +208,7 @@ function spawnTutorialEnemies(count) {
             ez = player.position.z + Math.sin(angle) * dist;
             att++;
         }
-        const mesh = new THREE.Mesh(
-            new THREE.BoxGeometry(1.2, 2.16, 1.2),
-            new THREE.MeshStandardMaterial({ color: 0xff0040, emissive: 0xff0040, emissiveIntensity: 0.8 })
-        );
+        const mesh = Toon.makeEnemy('runner', 1.2);
         mesh.position.set(ex, 1.08, ez);
         scene.add(mesh);
         enemies.push({
