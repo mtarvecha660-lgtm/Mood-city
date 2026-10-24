@@ -593,7 +593,7 @@ const Juice = (() => {
     resetRun();
     renderMenuProgress();
 
-    return { onShoot, onHit, onKill, onWaveStart, onWaveCleared, onPlayerHit, onRunStart, onPause, update,
+    return { dmgNumber, onShoot, onHit, onKill, onWaveStart, onWaveCleared, onPlayerHit, onRunStart, onPause, update,
              showGameOver, restartRun, dropChance, pickupRadius, extraShots, cycleSkin, renderMenuProgress,
              toggleMute, levelFor, xpForLevel, callout, get picking() { return picking; }, sfx, run };
 })();

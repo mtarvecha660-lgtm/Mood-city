@@ -623,7 +623,58 @@ const Toon = (() => {
         gun.scale.setScalar(0.5);
         gun.position.set(0.19, -0.18, -0.42);
         camera.add(gun);
+        buildBat();
         scene.add(camera);
+    }
+
+    // ── Melee viewmodel: a chunky toon baseball bat (cream grip tape, warm wood,
+    // coral-free so it never reads as an enemy). Hidden until melee is selected.
+    let bat = null, batSwingT = 0, batShow = 0, meleeOn = false;
+    function buildBat() {
+        bat = new THREE.Group();
+        const pivot = new THREE.Group();            // swing pivot sits at the hands
+        bat.add(pivot);
+        const wood  = toonMat(0xc98a4f, { emissive: 0xc98a4f, emissiveIntensity: 0.12 });
+        const dark  = toonMat(0x8a5532);
+        const tape  = toonMat(PAL.cream, { emissive: PAL.cream, emissiveIntensity: 0.1 });
+        const ink   = toonMat(PAL.ink);
+        const part = (g, m, y, o) => { const me = new THREE.Mesh(g, m); me.position.y = y; if (o) outline(me, o); me.renderOrder = 5; pivot.add(me); return me; };
+        part(geo('batKnob',   () => new THREE.CylinderGeometry(0.075, 0.06, 0.06, 12)), ink, -0.02);
+        part(geo('batGrip',   () => new THREE.CylinderGeometry(0.045, 0.05, 0.36, 12)), tape, 0.18, 1.12);
+        part(geo('batNeck',   () => new THREE.CylinderGeometry(0.075, 0.045, 0.34, 12)), wood, 0.53, 1.1);
+        part(geo('batBarrel', () => new THREE.CylinderGeometry(0.11, 0.075, 0.62, 14)), wood, 1.0, 1.08);
+        part(geo('batCap',    () => new THREE.SphereGeometry(0.11, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2)), wood, 1.31);
+        part(geo('batBand',   () => new THREE.CylinderGeometry(0.113, 0.113, 0.06, 14)), dark, 1.12);
+        bat.userData.pivot = pivot;
+        bat.scale.setScalar(0.5);
+        bat.position.set(0.3, -0.32, -0.55);
+        bat.visible = false;
+        camera.add(bat);
+    }
+    function setMelee(on) { meleeOn = !!on; }
+    function meleeSwing() { batSwingT = 0.0001; }
+
+    function updateBat(dt) {
+        if (!bat) return;
+        batShow += ((meleeOn ? 1 : 0) - batShow) * Math.min(1, dt * 14);
+        bat.visible = batShow > 0.02;
+        if (gun) gun.visible = batShow < 0.98;
+        const pv = bat.userData.pivot;
+        let sw = 0;                                   // 0 = rest, 1 = end of swing
+        if (batSwingT > 0) {
+            batSwingT += dt / 0.32;
+            if (batSwingT >= 1) batSwingT = 0;
+            const t = batSwingT;
+            // quick wind-up (0-0.2), fast slash (0.2-0.5), ease back (0.5-1)
+            sw = t < 0.2 ? -0.35 * (t / 0.2) : t < 0.5 ? -0.35 + 1.35 * ((t - 0.2) / 0.3) : 1 - (t - 0.5) / 0.5;
+        }
+        const moving = (typeof joystick !== 'undefined' && joystick.active) || keys['w'] || keys['a'] || keys['s'] || keys['d'];
+        const bob = moving ? Math.sin(bobTime) * 0.012 : 0;
+        const hide = 1 - batShow;
+        bat.position.set(0.3 + bob * 0.5 - sw * 0.22, -0.32 + Math.abs(bob) - hide * 0.4 + Math.max(0, sw) * 0.06, -0.55 - Math.max(0, sw) * 0.08);
+        // rest: bat over the right shoulder; swing: sweeps right -> left across the crosshair
+        pv.rotation.set(-0.35 - Math.max(0, sw) * 0.9, 0, 0.55 + sw * 2.1);
+        if (gun) gun.position.y -= batShow * 0.35;   // gun dips out of view while the bat is up
     }
 
     // Codex preview figure for an operative: a friendly cream toon character in
@@ -746,9 +797,10 @@ const Toon = (() => {
             gun.rotation.set(gunKick * 0.12 + R * 0.6, 0, R * 0.5);
             if (gunFlashT > 0) { gunFlashT -= dt; if (gunFlashT <= 0 && flashMesh) flashMesh.visible = false; }
         }
+        updateBat(dt);
         const nowMs = now;
         for (const e of enemies) animateEnemy(e, nowMs);
     }
 
-    return { PAL, OP_COLORS, buildWorld, makeEnemy, makeOperative, isHeadshot, makeBullet, makeEnemyBullet, makeRocket, makeDrop, animateDrop, DROP_COL, burst, ringPop, gunFire, setGunSkin, setTracerColor, update, toonMat };
+    return { PAL, OP_COLORS, buildWorld, makeEnemy, makeOperative, isHeadshot, makeBullet, makeEnemyBullet, makeRocket, makeDrop, animateDrop, DROP_COL, burst, ringPop, gunFire, setGunSkin, setTracerColor, update, toonMat, setMelee, meleeSwing };
 })();

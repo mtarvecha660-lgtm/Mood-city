@@ -20,8 +20,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Mood City">
     <link rel="apple-touch-icon" href="icons/icon-180.png">
-    <link rel="stylesheet" href="css/style.css?v=12">
-    <link rel="stylesheet" href="css/golden.css?v=12">
+    <link rel="stylesheet" href="css/style.css?v=13">
+    <link rel="stylesheet" href="css/golden.css?v=13">
 </head>
 <body>
 
@@ -166,17 +166,17 @@
             <div class="settings-section" id="settings-controls-section">
                 <div class="settings-section-label">// COMBAT INPUT & AI</div>
                 <div class="settings-row">
-                    <span class="settings-label">SHOW AI BUTTON</span>
+                    <span class="settings-label">AI FEATURES <span class="settings-note">shows the 🤖 AI menu</span></span>
                     <button class="settings-toggle"
                             id="ai-train-visibility-toggle"
                             onclick="toggleAITrainButtonSetting(); if (typeof Sound !== 'undefined') Sound.uiClick();">ON</button>
                 </div>
                 <div class="settings-row" id="gyro-row">
-                    <span class="settings-label">GYROSCOPE <span class="exp-tag">EXP</span></span>
+                    <span class="settings-label">GYRO AIM <span class="settings-note" id="gyro-note">tilt the phone to aim</span></span>
                     <button class="settings-toggle" id="gyro-toggle" onclick="toggleGyroSetting(); if (typeof Sound !== 'undefined') Sound.uiClick();">OFF</button>
                 </div>
                 <div class="settings-row" id="gyro-sens-row">
-                    <span class="settings-label">GYRO SENSITIVITY</span>
+                    <span class="settings-label">GYRO SENSITIVITY <button class="settings-mini" id="gyro-recenter" onclick="recenterGyro(true)">RECENTER</button></span>
                     <input type="range" min="1" max="20" class="settings-slider" id="gyro-sens-slider"
                            oninput="settings.gyroSensitivity=+this.value;document.getElementById('gyro-sens-val').innerText=this.value;saveSettings();">
                     <span class="settings-val" id="gyro-sens-val">10</span>
@@ -230,7 +230,7 @@
         <div id="pause-title">STANDBY</div>
         <div class="pause-actions">
             <button class="pause-btn" onclick="resumeGame(); if (typeof Sound !== 'undefined') Sound.uiClick();">&#9658; RESUME</button>
-            <button class="pause-btn secondary" onclick="AIMenu.open(); if (typeof Sound !== 'undefined') Sound.uiClick();">🤖 AI OPTIONS</button>
+            <button class="pause-btn secondary" id="pause-ai-btn" onclick="AIMenu.open(); if (typeof Sound !== 'undefined') Sound.uiClick();">🤖 AI OPTIONS</button>
             <button class="pause-btn secondary" id="pause-exit-btn" onclick="exitToMenu()">&#8592; ABORT TO MENU</button>
         </div>
     </div>
@@ -285,6 +285,7 @@
                 <span class="ammo-slash">/</span>
                 <span id="reserve-val">48</span>
             </div>
+            <div id="melee-pill" class="secondary-ammo-pill" onclick="toggleMelee()"><span class="mp-gun">🔫</span><span class="mp-bat">🏏 BAT</span> <span class="key-hint">[Q]</span></div>
             <div id="secondary-hud" style="display:none;" class="secondary-ammo-pill">
                 <span class="rocket-icon">🚀</span> <span id="secondary-ammo-val">3</span> <span class="key-hint">[F]</span>
             </div>
@@ -342,11 +343,13 @@
     <div id="fire-btn"      class="touch-btn touch-btn-fire">FIRE</div>
     <div id="reload-btn"    class="touch-btn touch-btn-reload">&#x21BA;</div>
     <div id="rocket-btn"    class="touch-btn touch-btn-rocket">🚀</div>
+    <div id="melee-btn"     class="touch-btn touch-btn-melee" aria-label="Switch to bat"><span class="mb-ico">🏏</span><span class="mb-lbl">BAT</span></div>
     <div id="pause-touch-btn" onclick="togglePause()">II</div>
 </div>
 
 <!-- Crosshair with dynamic hitmarker -->
 <div id="crosshair" style="display:none;">
+    <div class="ch-ring"></div>
     <div class="ch-line ch-top"></div>
     <div class="ch-line ch-bottom"></div>
     <div class="ch-line ch-left"></div>
@@ -357,15 +360,15 @@
 
 <!-- Scripts -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="js/state.js?v=12"></script>
-<script src="js/audio.js?v=12"></script>
-<script src="js/mobile.js?v=12"></script>
-<script src="js/controls.js?v=12"></script>
-<script src="js/tutorial.js?v=12"></script>
-<script src="js/toon.js?v=12"></script>
-<script src="js/juice.js?v=12"></script>
-<script src="js/game.js?v=12"></script>
-<script src="js/ai-player.js?v=12"></script>
+<script src="js/state.js?v=13"></script>
+<script src="js/audio.js?v=13"></script>
+<script src="js/mobile.js?v=13"></script>
+<script src="js/controls.js?v=13"></script>
+<script src="js/tutorial.js?v=13"></script>
+<script src="js/toon.js?v=13"></script>
+<script src="js/juice.js?v=13"></script>
+<script src="js/game.js?v=13"></script>
+<script src="js/ai-player.js?v=13"></script>
 <script>
 // Menu backdrop: two layers of flat skyline silhouettes
 (function() {

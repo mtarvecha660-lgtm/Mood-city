@@ -1388,16 +1388,24 @@ ${sparkline}
     function updateTrainButtonVisibility() {
         const btn = document.getElementById('ai-btn');
         if (!btn) return;
-        btn.classList.toggle('hidden-by-setting', settings.aiTrainButtonVisible === false);
+        btn.classList.toggle('hidden-by-setting', !settings.aiFeatures);
+        const pb = document.getElementById('pause-ai-btn');
+        if (pb) pb.style.display = settings.aiFeatures ? '' : 'none';
     }
 
     window.setNexusTrainButtonVisible = function(visible) {
-        settings.aiTrainButtonVisible = visible !== false;
+        settings.aiFeatures = visible !== false;
+        if (!settings.aiFeatures) {          // turning AI off also stops anything it is doing
+            if (training) { stopTraining(); if (typeof exitToMenu === 'function') exitToMenu(); }
+            else if (active) disable();
+            if (typeof AIMenu !== 'undefined') AIMenu.close(true);
+        }
         updateTrainButtonVisibility();
+        if (typeof AIMenu !== 'undefined') AIMenu.render();
         const toggle = document.getElementById('ai-train-visibility-toggle');
         if (toggle) {
-            toggle.innerText = settings.aiTrainButtonVisible ? 'ON' : 'OFF';
-            toggle.classList.toggle('on', settings.aiTrainButtonVisible);
+            toggle.innerText = settings.aiFeatures ? 'ON' : 'OFF';
+            toggle.classList.toggle('on', settings.aiFeatures);
         }
     };
 
@@ -1413,6 +1421,7 @@ ${sparkline}
         injectUI();
         document.addEventListener('keydown', e => {
             // Alt+A  → toggle manual AI
+            if (!settings.aiFeatures) return;   // AI features off: shortcuts do nothing
             if (e.altKey && e.key.toLowerCase() === 'a') {
                 if (!training) active ? disable() : enable();
             }
@@ -1642,7 +1651,8 @@ const AIMenu = (() => {
 
     function renderChip() {
         const btn = $('ai-btn');
-        if (btn) { const menu = $('menu'); btn.style.display = (menu && menu.style.display !== 'none' && getComputedStyle(menu).display !== 'none') ? '' : 'none'; }
+        if (btn) { const menu = $('menu'); btn.style.display = (settings.aiFeatures && menu && menu.style.display !== 'none' && getComputedStyle(menu).display !== 'none') ? '' : 'none'; }
+        const pb = $('pause-ai-btn'); if (pb) pb.style.display = settings.aiFeatures ? '' : 'none';
         const chip = $('ai-chip'); if (!chip) return;
         const running = typeof gameRunning !== 'undefined' && gameRunning;
         if (NEXUS.isTraining) {
@@ -1664,6 +1674,7 @@ const AIMenu = (() => {
     }
 
     function open() {
+        if (!settings.aiFeatures) return;
         if (typeof gameRunning !== 'undefined' && gameRunning && !gamePaused && !NEXUS.isTraining) {
             gamePaused = true; pausedByMenu = true;
             if (typeof Juice !== 'undefined') Juice.onPause(true);

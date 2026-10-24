@@ -569,8 +569,20 @@ function init() {
 
 // ── Weapons ──
 
+function aimDir(spread) {
+    return new THREE.Vector3(
+        -Math.sin(yaw + spread) * Math.cos(pitch),
+         Math.sin(pitch),
+        -Math.cos(yaw + spread) * Math.cos(pitch)
+    ).normalize();
+}
+
 function shoot() {
-    if (!gameRunning || gamePaused || isReloading || ammo <= 0) return;
+    if (!gameRunning || gamePaused) return;
+    if (meleeActive) { swingMelee(); return; }
+    if (ammo <= 0 && reserve <= 0 && !isReloading) { setMelee(true, true); return; }
+    if (ammo <= 0 && reserve > 0 && !isReloading) { reload(); return; }
+    if (isReloading || ammo <= 0) return;
     const now = performance.now();
     const cd  = (boosts.rapid && Date.now() < boosts.rapid) ? shootCooldown * 0.4 : shootCooldown;
     if (now - lastShotTime < cd) return;
@@ -583,20 +595,87 @@ function shoot() {
     const activeDmg = hot ? bulletDmg * 2 : bulletDmg;
     let spreads = burstCount === 3 ? [-0.22, 0, 0.22] : [0];
     if (Juice.extraShots()) spreads = spreads.flatMap(s => [s - 0.025, s + 0.025]);
+    // Crosshair accuracy: the bullet's real path is the camera's centre ray (from the
+    // eye, exactly through the crosshair). Only the tracer mesh starts at the gun
+    // muzzle, and its offset melts into the true path over the first few metres.
+    // (Before, the bullet flew from the muzzle PARALLEL to the view ray, so every
+    // shot landed ~0.2 right and ~0.12 below where the crosshair pointed.)
+    const eye = player.position.clone();
+    eye.y += Math.sin(bobTime) * 0.055;
+    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const muzzleOff = right.multiplyScalar(0.18).add(new THREE.Vector3(0, -0.12, 0));
     for (let s of spreads) {
-        let dir = new THREE.Vector3(
-            -Math.sin(yaw + s) * Math.cos(pitch),
-             Math.sin(pitch),
-            -Math.cos(yaw + s) * Math.cos(pitch)
-        ).normalize();
-        let bullet = Toon.makeBullet(dir, hot);
-        // start slightly below/right of the eye so tracers read as coming from the gun
-        const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-        bullet.position.copy(player.position).addScaledVector(right, 0.18).add(new THREE.Vector3(0, -0.12, 0));
+        const dir = aimDir(s);
+        const bullet = Toon.makeBullet(dir, hot);
+        const pos = eye.clone();
+        bullet.position.copy(pos).add(muzzleOff);
         bullet.lookAt(bullet.position.clone().add(dir));
-        bullets.push({ mesh: bullet, dir, dist: 0, dmg: activeDmg });
+        bullets.push({ mesh: bullet, pos, off: muzzleOff.clone(), dir, dist: 0, dmg: activeDmg });
         scene.add(bullet);
     }
+}
+
+// ── Melee (bat) ──
+// Switch with the bat button / Q. Auto-switches when the gun is completely dry
+// and back to the gun as soon as ammo arrives (only if the switch was automatic).
+let meleeActive = false, meleeAuto = false, lastMeleeTime = 0;
+const MELEE_RANGE = 3.4, MELEE_ARC = Math.cos(THREE.MathUtils.degToRad(55)), MELEE_DMG = 75, MELEE_CD = 430;
+
+function setMelee(on, auto) {
+    on = !!on;
+    if (on === meleeActive) return;
+    meleeActive = on; meleeAuto = on && !!auto;
+    if (on) isReloading = false;
+    if (typeof Toon !== 'undefined' && Toon.setMelee) Toon.setMelee(on);
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.playWeaponSwap) AudioEngine.playWeaponSwap();
+    const btn = document.getElementById('melee-btn');
+    if (btn) btn.classList.toggle('on', on);
+    const fire = document.getElementById('fire-btn');
+    if (fire) fire.innerText = on ? 'SWING' : 'FIRE';
+    document.body.classList.toggle('melee-mode', on);
+    if (typeof updateUI === 'function') updateUI();
+}
+function toggleMelee() {
+    if (!gameRunning || gamePaused) return;
+    if (meleeActive && ammo <= 0 && reserve <= 0) { showFloatingFeedback('NO AMMO YET', 'warn'); return; }
+    setMelee(!meleeActive, false);
+}
+
+function swingMelee() {
+    const now = performance.now();
+    if (now - lastMeleeTime < MELEE_CD) return;
+    lastMeleeTime = now;
+    Toon.meleeSwing();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.playSwing) AudioEngine.playSwing();
+    shotsFired++;
+    // hit test lands at the fast part of the swing
+    const gen = runGen;
+    setTimeout(() => {
+        if (!gameRunning || gen !== runGen) return;
+        const fw = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+        let hits = 0;
+        for (const e of enemies) {
+            const to = e.mesh.position.clone().sub(player.position); to.y = 0;
+            const reach = MELEE_RANGE + (e.size || 1) * 0.5;
+            const d = to.length();
+            if (d > reach) continue;
+            if (d > 0.6 && to.clone().normalize().dot(fw) < MELEE_ARC) continue;
+            const dmg = e.isBoss ? MELEE_DMG * 0.6 : MELEE_DMG;
+            e.hp -= dmg; e.hitFlash = 1.0; e._meleeKill = true;
+            // knockback: shove straight away from the player, applied over a few frames
+            const push = to.lengthSq() > 0.0001 ? to.normalize() : fw.clone();
+            e.knock = push.multiplyScalar(e.isBoss ? 0.25 : 0.7);
+            hits++; shotsHit++;
+            const hp = e.mesh.position.clone(); hp.y += (e.size || 1) * 0.6;
+            Toon.burst(hp, 'dust', 10, 0.8);
+            if (typeof Juice !== 'undefined' && Juice.dmgNumber) Juice.dmgNumber(hp, Math.round(dmg), false);
+        }
+        if (hits) {
+            triggerHitMarker(hits > 1);
+            shakeAmount = Math.max(shakeAmount, 0.18);
+            if (typeof AudioEngine !== 'undefined' && AudioEngine.playBonk) AudioEngine.playBonk(); else Sound.enemyHit();
+        }
+    }, 110);
 }
 
 // ── Combat Feedback & Floating Layer ──
@@ -669,7 +748,7 @@ function rocketExplode(pos) {
 }
 
 function reload() {
-    if (isReloading || reserve <= 0 || ammo === maxClip) return;
+    if (isReloading || reserve <= 0 || ammo === maxClip || meleeActive) return;
     isReloading = true; Sound.reload();
     document.getElementById('wave-status').innerText = 'RELOADING...';
     setTimeout(() => {
@@ -915,6 +994,34 @@ function spawnDrop(pos, guaranteed) {
     drops.push({ mesh: dMesh, type: isH ? 'hp' : 'ammo' });
 }
 
+function ammoIsLow() { return ammo + reserve <= maxClip; }
+function spawnAmmoDrop(pos) {
+    const dMesh = Toon.makeDrop('ammo');
+    dMesh.position.set(pos.x, 0.8, pos.z);
+    scene.add(dMesh);
+    drops.push({ mesh: dMesh, type: 'ammo' });
+}
+
+// Passive trickle: while the gun is (nearly) dry, a round trickles into reserve
+// every 1.6 s up to one clip, so a run can never get stuck at zero.
+let lastTrickle = 0;
+function ammoTick() {
+    const now = performance.now();
+    if (ammo + reserve < maxClip) {
+        if (now - lastTrickle > 1600) {
+            lastTrickle = now;
+            reserve++;
+            if (ammo === 0 && !meleeActive && !isReloading) reload();
+        }
+    } else lastTrickle = now;
+    // auto-switch: dry -> bat; ammo back (from a pickup or a full clip of trickle) -> gun
+    if (!meleeActive && ammo <= 0 && reserve <= 0 && !isReloading) setMelee(true, true);
+    else if (meleeActive && meleeAuto && (ammo > 0 || reserve >= Math.min(maxClip, 6))) {
+        setMelee(false);
+        if (ammo === 0) reload();
+    }
+}
+
 // ── Minimap ──
 
 function drawMinimap() {
@@ -996,7 +1103,14 @@ function updateUI() {
     setText('reserve-val', reserve);
     setText('score-val', score.toLocaleString());
     setText('enemies-left', enemies.length + enemiesToSpawn);
-    document.getElementById('reload-msg').style.display = (ammo <= 3 && reserve > 0) ? 'block' : 'none';
+    const rm = document.getElementById('reload-msg');
+    const dry = ammo <= 0 && reserve <= 0;
+    if (rm) {
+        if (rm._txt === undefined) rm._txt = rm.innerHTML;
+        const want = dry ? 'NO AMMO · BAT OUT' : rm._txt;
+        if (rm._shown !== want) { rm.innerHTML = want; rm._shown = want; }
+        rm.style.display = (dry || (ammo <= 3 && reserve > 0 && !meleeActive)) ? 'block' : 'none';
+    }
 
     // Combo display
     const comboEl = document.getElementById('combo-display');
@@ -1117,41 +1231,44 @@ function animate() {
             (0.7 + Math.sin(nowMs * 0.0008 + light.userData.phase) * 0.45);
     });
 
-    // Player bullets
+    // Player bullets (swept: checked every 0.25 units so fast bullets can't tunnel
+    // through an enemy between frames; logical path = the crosshair ray)
     for (let i = bullets.length - 1; i >= 0; i--) {
         let b = bullets[i];
+        if (!b.pos) b.pos = b.mesh.position.clone();
         let speed = b.isRocket ? 1.5 : 2.0;
-        let nextPos = b.mesh.position.clone().add(b.dir.clone().multiplyScalar(speed));
-
-        // Rocket hits building or ground
-        if (b.isRocket && (checkCollision(nextPos, 0.3) || nextPos.y <= 0.25 || b.dist > 60)) {
-            rocketExplode(nextPos);
-            disposeMesh(b.mesh); bullets.splice(i, 1); continue;
-        }
-
-        if (!b.isRocket && (checkCollision(nextPos, 0.2) || b.dist > 150)) {
-            if (b.dist <= 150) createImpact(nextPos, 0xd9b796, 6);
-            disposeMesh(b.mesh); bullets.splice(i, 1); continue;
-        }
-
-        let hitEnemy = false;
-        for (let e of enemies) {
-            let r = e.size / 2 + 0.4;
-            const topY = e.mesh.position.y + e.size * 0.9 + 0.35;
-            if (nextPos.x > e.mesh.position.x - r && nextPos.x < e.mesh.position.x + r &&
-                nextPos.z > e.mesh.position.z - r && nextPos.z < e.mesh.position.z + r &&
-                nextPos.y < topY) {
-                const base = b.dmg || bulletDmg;
-                e.hp -= b.isRocket ? base : Juice.onHit(e, nextPos, b.dir, base);
-                e.hitFlash = 1.0;
-                hitEnemy = true;
-                shotsHit++;
-                break;
+        const STEPS = 8, stepLen = speed / STEPS;
+        let done = false, nextPos = b.pos.clone();
+        for (let st = 0; st < STEPS && !done; st++) {
+            nextPos.addScaledVector(b.dir, stepLen);
+            const travelled = b.dist + stepLen * (st + 1);
+            if (b.isRocket && (checkCollision(nextPos, 0.3) || nextPos.y <= 0.25 || travelled > 60)) {
+                rocketExplode(nextPos); done = true; break;
+            }
+            if (!b.isRocket && (checkCollision(nextPos, 0.2) || nextPos.y <= 0.02 || travelled > 150)) {
+                if (travelled <= 150) createImpact(nextPos, 0xd9b796, 6);
+                done = true; break;
+            }
+            for (let e of enemies) {
+                let r = e.size / 2 + 0.4;
+                const topY = e.mesh.position.y + e.size * 0.9 + 0.35;
+                if (nextPos.x > e.mesh.position.x - r && nextPos.x < e.mesh.position.x + r &&
+                    nextPos.z > e.mesh.position.z - r && nextPos.z < e.mesh.position.z + r &&
+                    nextPos.y < topY) {
+                    const base = b.dmg || bulletDmg;
+                    e.hp -= b.isRocket ? base : Juice.onHit(e, nextPos, b.dir, base);
+                    e.hitFlash = 1.0; e._meleeKill = false;
+                    shotsHit++;
+                    if (b.isRocket) rocketExplode(nextPos);
+                    done = true; break;
+                }
             }
         }
-        if (hitEnemy && !b.isRocket) { disposeMesh(b.mesh); bullets.splice(i, 1); continue; }
-        if (hitEnemy && b.isRocket)  { rocketExplode(nextPos); disposeMesh(b.mesh); bullets.splice(i, 1); continue; }
-        b.mesh.position.copy(nextPos); b.dist += speed;
+        if (done) { disposeMesh(b.mesh); bullets.splice(i, 1); continue; }
+        b.pos.copy(nextPos); b.dist += speed;
+        const fade = b.off ? Math.max(0, 1 - b.dist / 7) : 0;
+        b.mesh.position.copy(b.pos);
+        if (fade > 0) b.mesh.position.addScaledVector(b.off, fade);
     }
 
     // Enemy bullets
@@ -1218,6 +1335,15 @@ function animate() {
             e.mesh.material.emissiveIntensity = 0.8;
         }
 
+        // Melee knockback (decays over a few frames, blocked by buildings)
+        if (e.knock && e.hp > 0) {
+            const k = e.knock;
+            e.mesh.position.x += k.x; if (checkCollision(e.mesh.position, (e.size || 1) * 0.4)) e.mesh.position.x -= k.x;
+            e.mesh.position.z += k.z; if (checkCollision(e.mesh.position, (e.size || 1) * 0.4)) e.mesh.position.z -= k.z;
+            k.multiplyScalar(0.72);
+            if (k.lengthSq() < 0.0004) e.knock = null;
+        }
+
         if (e.hp <= 0) {
             // Scoring, combo, streak callouts, confetti, kill pop — see js/juice.js
             const actualPts = Juice.onKill(e);
@@ -1233,7 +1359,7 @@ function animate() {
 
             // Kill feed
             const feedName = e.isBoss ? 'OVERLORD' : (e.name || 'ENEMY');
-            addKillFeedEntry(`${e._headKill ? '◎ ' : ''}${feedName} <b>+${actualPts}</b>${comboMultiplier > 1 ? ' <i>x' + comboMultiplier + '</i>' : ''}`, '#fff4e2');
+            addKillFeedEntry(`${e._meleeKill ? '🏏 ' : e._headKill ? '◎ ' : ''}${feedName} <b>+${actualPts}</b>${comboMultiplier > 1 ? ' <i>x' + comboMultiplier + '</i>' : ''}`, '#fff4e2');
 
             // Drops
             if (e.isBoss) {
@@ -1245,8 +1371,13 @@ function animate() {
                 const bossBarWrapper = document.getElementById('boss-bar-wrapper');
                 if (bossBarWrapper) bossBarWrapper.style.display = 'none';
                 // (BOSS DOWN is shown by the single callout card; no second banner)
+            } else if (ammoIsLow() && !drops.some(d => d.type === 'ammo')) {
+                // Never soft-lock: when low on ammo the next kill ALWAYS drops ammo
+                spawnAmmoDrop(e.mesh.position);
             } else if (Math.random() < Juice.dropChance()) {
                 spawnDrop(e.mesh.position);
+            } else if (Math.random() < 0.18) {
+                spawnAmmoDrop(e.mesh.position);   // extra ammo-only roll: pickups are more frequent
             }
 
             disposeMesh(e.mesh); enemies.splice(i, 1); continue;
@@ -1415,6 +1546,8 @@ function animate() {
 
     if (enemies.length === 0 && enemiesToSpawn === 0 && !isWaveTransition) Juice.onWaveCleared();
 
+    ammoTick();
+
     // Drops
     for (let i = drops.length - 1; i >= 0; i--) {
         let d = drops[i];
@@ -1428,7 +1561,7 @@ function animate() {
             Sound.pickup();
             const healAmt = selectedChar === 'medic' ? 50 : 25;
             if      (d.type === 'hp')        hp = Math.min(playerMaxHp, hp + healAmt);
-            else if (d.type === 'ammo')      { const c = CHARS[selectedChar]; reserve = Math.min(MAX_RESERVE, c ? c.reserve : MAX_RESERVE); }
+            else if (d.type === 'ammo')      { const c = CHARS[selectedChar]; reserve = Math.min(MAX_RESERVE, Math.max(reserve + Math.ceil((c ? c.reserve : 48) / 2), c ? c.reserve : MAX_RESERVE)); if (ammo === 0 && !meleeActive) setTimeout(reload, 50); }
             else if (d.type === 'powerup')   applyPowerup(d.powerup);
             else if (d.type === 'secondary') { hasSecondaryWeapon = true; secondaryAmmo = 3; }
             createImpact(d.mesh.position, d.mesh.material.color.getHex(), 15);
@@ -1491,6 +1624,7 @@ function startGame() {
     const c = CHARS[selectedChar];
     playerSpeed = c.speed; playerMaxHp = c.maxHp; shootCooldown = c.cooldown;
     bulletDmg = c.dmg; maxClip = c.clip; ammo = c.clip; burstCount = c.burst;
+    if (typeof setMelee === 'function') setMelee(false); meleeAuto = false; lastTrickle = performance.now();
     hp = c.maxHp; reserve = c.reserve; boosts = {};
 
     // Reset run stats
@@ -1584,18 +1718,18 @@ function updateSettingsUI() {
     }
     const aiTrainToggle = document.getElementById('ai-train-visibility-toggle');
     if (aiTrainToggle) {
-        const visible = settings.aiTrainButtonVisible !== false;
+        const visible = !!settings.aiFeatures;
         aiTrainToggle.innerText = visible ? 'ON' : 'OFF';
         aiTrainToggle.classList.toggle('on', visible);
     }
 }
 
 function toggleAITrainButtonSetting() {
-    settings.aiTrainButtonVisible = !settings.aiTrainButtonVisible;
+    settings.aiFeatures = !settings.aiFeatures;
     saveSettings();
     updateSettingsUI();
     if (typeof window.setNexusTrainButtonVisible === 'function') {
-        window.setNexusTrainButtonVisible(settings.aiTrainButtonVisible);
+        window.setNexusTrainButtonVisible(settings.aiFeatures);
     }
 }
 

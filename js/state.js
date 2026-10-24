@@ -113,7 +113,10 @@ const settings = {
     gyroEnabled:          localStorage.getItem('msc_gyro')   === 'true',
     gyroSensitivity:      parseInt(localStorage.getItem('msc_gyroS') ?? '10'),
     lookSensitivity:      parseInt(localStorage.getItem('msc_lookS') ?? '7'),
-    aiTrainButtonVisible: localStorage.getItem('msc_aiTrainBtn') !== 'false'
+    aiTrainButtonVisible: localStorage.getItem('msc_aiTrainBtn') !== 'false',
+    // AI features are OFF by default: new players never see the 🤖 menu until they
+    // turn on "AI features" in Settings.
+    aiFeatures:           localStorage.getItem('msc_ai') === 'true'
 };
 function saveSettings() {
     localStorage.setItem('msc_vol',        settings.masterVolume);
@@ -121,6 +124,7 @@ function saveSettings() {
     localStorage.setItem('msc_gyroS',      settings.gyroSensitivity);
     localStorage.setItem('msc_lookS',      settings.lookSensitivity);
     localStorage.setItem('msc_aiTrainBtn', settings.aiTrainButtonVisible);
+    localStorage.setItem('msc_ai',         settings.aiFeatures);
     if (typeof AudioEngine !== 'undefined') AudioEngine.updateVolume();
 }
 
