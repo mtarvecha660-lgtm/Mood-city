@@ -229,6 +229,7 @@ window.Coop = (() => {
             case 'start': spawnAt = null; beginRun(m.seed, m.diff); break;
             case 'snap': if (running) applySnap(m); break;
             case 'eb': if (running) spawnEnemyBullet(m); break;
+            case 'bfx': if (running && m.m) { if (m.m.k === 'clear') clearBossFx(); else bossFx(m.m, false); } break;
             case 'gone': if (running) clientGone(m); break;
             case 'wave': if (running) clientWave(m); break;
             case 'cleared': if (running && gameRunning) Juice.onWaveCleared(); break;
@@ -299,7 +300,7 @@ window.Coop = (() => {
     function scaleCount(count) { return Math.round(count * (1 + 0.5 * (nPlayers() - 1))); }
     function onSpawn(e) {
         if (!isHost()) return;
-        const k = e.isBoss ? 1 + 0.6 * (nPlayers() - 1) : 1 + 0.35 * (nPlayers() - 1);
+        const k = e.isBoss ? 1 + 0.75 * (nPlayers() - 1) : 1 + 0.35 * (nPlayers() - 1);
         const v = e.hp * k;
         delete e.hp;
         e.id = ++enemySeq;
@@ -366,6 +367,15 @@ window.Coop = (() => {
         broadcast({ t: 'eb', p: [r2(b.mesh.position.x), r2(b.mesh.position.y), r2(b.mesh.position.z)],
                     d: [Math.round(b.dir.x * 1000) / 1000, Math.round(b.dir.y * 1000) / 1000, Math.round(b.dir.z * 1000) / 1000],
                     s: b.speed, dm: b.damage, r: b.range, b: big ? 1 : 0 });
+    }
+    function bossFxSend(fx) { if (isHost()) broadcast({ t: 'bfx', m: fx }); }
+    // host: damage remote players standing within r of (x, z) — once each per `done` set
+    function hurtNear(x, z, r, dmg, done) {
+        if (!isHost()) return;
+        for (const p of players.values()) {
+            if (p.slot === mySlot || !standing(p) || (done && done.has(p.slot))) continue;
+            if (Math.hypot(p.x - x, p.z - z) < r) { if (done) done.add(p.slot); send(connOf(p.slot), { t: 'dmg', a: dmg }); }
+        }
     }
     function onWaveStart(num) {
         if (Juice.picking) Juice.pickPerk(0, true);     // a perk not picked in time: take the first
@@ -486,7 +496,7 @@ window.Coop = (() => {
             const p = players.get(m.k);
             addKillFeedEntry(`${esc(p ? p.name : 'TEAM')} › ${e.name}`, '#fff4e2');
         }
-        if (e.isBoss) { isBossWave = false; const bb = $('boss-bar-wrapper'); if (bb) bb.style.display = 'none'; }
+        if (e.isBoss) { isBossWave = false; clearBossFx(); const bb = $('boss-bar-wrapper'); if (bb) bb.style.display = 'none'; }
         disposeMesh(e.mesh);
         const i = enemies.indexOf(e);
         if (i >= 0) enemies.splice(i, 1);
@@ -774,6 +784,7 @@ window.Coop = (() => {
         enemies.length = 0; bullets.length = 0; enemyBullets.length = 0; drops.length = 0;
         buildings.length = 0; particles.length = 0; killFeedEntries.length = 0;
         enemyById.clear(); pickedIds.clear(); pendingHits = [];
+        if (typeof clearBossFx === 'function') clearBossFx();
         score = 0; wave = 0; enemiesToSpawn = 0; isWaveTransition = false; gamePaused = false;
         isBossWave = false; currentWaveModifier = null; isReloading = false; lastShotTime = 0;
         shakeAmount = 0; damageFlashAmount = 0; chromaAmount = 0; yaw = 0; pitch = 0; tutorialMode = false;
@@ -1051,7 +1062,7 @@ window.Coop = (() => {
     return {
         get active() { return active; }, get downed() { return downed; }, get inRoom() { return inRoom; },
         isHost, isClient, open, leave, withSeed, canAct, preFrame, postFrame, clientTick,
-        target, spawnAnchor, hurtRemote, scaleCount, onSpawn, killedByMe, killerName, otherKill, enemyGone, ebSpawn,
+        target, spawnAnchor, hurtRemote, hurtNear, bossFxSend, scaleCount, onSpawn, killedByMe, killerName, otherKill, enemyGone, ebSpawn,
         onWaveStart, onWaveCleared, onLocalShot, onLocalPickup(d) { if (role === 'client' && d.id) { pickedIds.add(d.id); send(hostConn, { t: 'pick', id: d.id }); } },
         drawMinimap, onRunInit, playAgain, toggleMenu, showMenu,
         _debug: () => ({ role, code, mySlot, inRoom, active, running, downed, players: [...players.values()].map(p => ({ slot: p.slot, name: p.name, x: p.x, z: p.z, hp: p.hp, down: p.down, rev: p.rev, avatar: !!p.avatar })), enemies: enemies.map(e => ({ id: e.id, hp: Math.ceil(e.hp), x: +e.mesh.position.x.toFixed(2), z: +e.mesh.position.z.toFixed(2) })) })
