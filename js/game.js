@@ -894,12 +894,185 @@ function startWave(num) {
     }, 1500);
 }
 
+// ── OVERLORD attacks ──
+// Every attack is telegraphed on the ground in warm red (Golden Hour palette, no
+// glow) and the boss flashes cream while it winds up. The host decides; bossFx()
+// draws the telegraph here and on every co-op client, and each peer checks its
+// OWN player when a slam / rock lands (same model as enemy bullets).
+const BOSS_TELE_COL = 0xd9452b;
+const bossFxList = [];
+function _bossFlatMat(color, opacity) {
+    return new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide });
+}
+function bossHurtLocal(dmg) {
+    if (!gameRunning || hp <= 0) return false;
+    if (window.Coop && Coop.active && Coop.downed) return false;
+    if (boosts.shield && Date.now() < boosts.shield) return false;
+    if (difficultyMode === 'ghost') hp = 0;
+    else { hp -= dmg; waveDamageTaken += dmg; }
+    damageFlashAmount = 0.8; shakeAmount = Math.max(shakeAmount, 0.3); chromaAmount = 1.0;
+    Juice.onPlayerHit();
+    return true;
+}
+// m: { k: 'slam'|'rain'|'volley'|'charge', x, z, r, ms, dmg, dx, dz, len }
+function bossFx(m, broadcast) {
+    if (broadcast && window.Coop && Coop.active && Coop.isHost()) Coop.bossFxSend(m);
+    const g = new THREE.Group();
+    let fill = null;
+    if (m.k === 'charge') {
+        const w = m.r * 2;
+        const lane = new THREE.Mesh(new THREE.PlaneGeometry(w, m.len), _bossFlatMat(BOSS_TELE_COL, 0.22));
+        lane.rotation.x = -Math.PI / 2; lane.position.z = m.len / 2; g.add(lane);
+        for (const sx of [-1, 1]) {
+            const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.3, m.len), _bossFlatMat(BOSS_TELE_COL, 0.85));
+            edge.rotation.x = -Math.PI / 2; edge.position.set(sx * w / 2, 0.01, m.len / 2); g.add(edge);
+        }
+        fill = new THREE.Mesh(new THREE.PlaneGeometry(w, 1), _bossFlatMat(BOSS_TELE_COL, 0.35));
+        fill.rotation.x = -Math.PI / 2; fill.position.y = 0.02; g.add(fill);
+        g.rotation.y = Math.atan2(m.dx, m.dz);
+    } else {
+        const ring = new THREE.Mesh(new THREE.RingGeometry(Math.max(0.2, m.r - 0.35), m.r, 48), _bossFlatMat(BOSS_TELE_COL, m.k === 'volley' ? 0.6 : 0.9));
+        ring.rotation.x = -Math.PI / 2; g.add(ring);
+        if (m.k !== 'volley') {
+            fill = new THREE.Mesh(new THREE.CircleGeometry(1, 40), _bossFlatMat(BOSS_TELE_COL, 0.3));
+            fill.rotation.x = -Math.PI / 2; fill.position.y = 0.01; fill.scale.set(0.01, 0.01, 0.01); g.add(fill);
+        }
+    }
+    g.position.set(m.x, 0.07, m.z);
+    scene.add(g);
+    bossFxList.push({ g, fill, m, t0: performance.now() });
+    if ((m.k === 'slam' || m.k === 'charge') && player && Math.hypot(player.position.x - m.x, player.position.z - m.z) < 45 && window.AudioEngine) AudioEngine.playBossWarning();
+}
+function _bossFxDispose(fx) {
+    scene.remove(fx.g);
+    fx.g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+}
+function updateBossFx() {
+    const now = performance.now();
+    const boss = enemies.find(e => e.isBoss);
+    let winding = false;
+    for (let i = bossFxList.length - 1; i >= 0; i--) {
+        const fx = bossFxList[i], m = fx.m;
+        const k = Math.min(1, (now - fx.t0) / m.ms);
+        if (m.k !== 'rain') winding = winding || k < 1;
+        if (fx.fill) {
+            if (m.k === 'charge') { fx.fill.scale.y = Math.max(0.01, m.len * k); fx.fill.position.z = m.len * k / 2; }
+            else { const s = Math.max(0.01, m.r * k); fx.fill.scale.set(s, s, s); }
+        }
+        if (k >= 1) {
+            if (m.k === 'slam' || m.k === 'rain') {
+                const c = new THREE.Vector3(m.x, 0.3, m.z);
+                createImpact(c, 0xd9b796, m.k === 'slam' ? 40 : 14);
+                Toon.ringPop(c, m.k === 'slam' ? m.r / 1.6 : m.r / 2, BOSS_TELE_COL);
+                if (player) {
+                    const d = Math.hypot(player.position.x - m.x, player.position.z - m.z);
+                    if (d < m.r) { if (bossHurtLocal(m.dmg)) Sound.hit(); }
+                    if (d < 30) { shakeAmount = Math.max(shakeAmount, m.k === 'slam' ? 0.45 : 0.15); if (m.k === 'slam') Sound.bomberBoom(); }
+                }
+            }
+            _bossFxDispose(fx); bossFxList.splice(i, 1);
+        }
+    }
+    // wind-up flash on the boss itself (works on clients' proxies too)
+    if (boss && boss.mesh.material) {
+        const mat = boss.mesh.material;
+        if (!boss._baseCol) boss._baseCol = mat.color.clone();
+        if (winding) {
+            const f = 0.5 + 0.5 * Math.sin(now * 0.025);
+            mat.color.copy(boss._baseCol).lerp(new THREE.Color(0xfff4e2), 0.25 + 0.45 * f);
+        } else mat.color.copy(boss._baseCol);
+    }
+}
+function clearBossFx() {
+    bossFxList.forEach(_bossFxDispose); bossFxList.length = 0;
+}
+function bossEndAttack(e, ph, recover) {
+    e.atk = null;
+    e.nextAtk = Date.now() + recover + [0, 1700, 1250, 850][ph] + Math.random() * 500;
+}
+function bossPickAttack(e, ph, hd, tp, coopHost) {
+    const bp = e.mesh.position, now = Date.now();
+    const opts = [];
+    opts.push(['volley', 3]);
+    if (hd < 12) opts.push(['slam', 5]);
+    if (hd > 9 && hd < 45) opts.push(['charge', ph >= 2 ? 3 : 2]);
+    if (ph >= 2 && hd > 7) opts.push(['rain', 3]);
+    const pool = opts.filter(o => o[0] !== e.lastAtk || opts.length === 1);
+    let tot = pool.reduce((s, o) => s + o[1], 0), r = Math.random() * tot, k = pool[0][0];
+    for (const o of pool) { r -= o[1]; if (r <= 0) { k = o[0]; break; } }
+    e.lastAtk = k;
+    const fast = [0, 1, 0.85, 0.72][ph];
+    if (k === 'volley') {
+        const wind = Math.round(900 * fast);
+        e.atk = { k, t0: now, wind, fired: 0, waves: ph, count: [0, 5, 7, 9][ph], spread: [0, 0.75, 0.95, 1.15][ph],
+                  speed: [0, 0.6, 0.68, 0.75][ph], dmg: [0, 10, 12, 14][ph] };
+        bossFx({ k, x: bp.x, z: bp.z, r: e.size * 0.9, ms: wind }, coopHost);
+    } else if (k === 'slam') {
+        const wind = Math.round(1000 * fast), rad = 9 + ph;
+        e.atk = { k, t0: now, wind };
+        bossFx({ k, x: bp.x, z: bp.z, r: rad, ms: wind, dmg: 22 + ph * 6 }, coopHost);
+    } else if (k === 'charge') {
+        const wind = Math.round(950 * fast);
+        const dir = new THREE.Vector3(tp.x - bp.x, 0, tp.z - bp.z).normalize();
+        const len = Math.min(hd + 10, 42);
+        e.atk = { k, t0: now, wind, dir, len, went: 0, speed: [0, 0.85, 1.0, 1.2][ph], dmg: 20 + ph * 6,
+                  hitMe: false, hitSet: new Set(), lastDust: 0 };
+        bossFx({ k, x: bp.x, z: bp.z, r: e.size / 2 + 0.6, ms: wind, dx: dir.x, dz: dir.z, len }, coopHost);
+    } else {
+        const wind = Math.round(1100 * fast), n = ph === 2 ? 3 : 5;
+        e.atk = { k, t0: now, wind };
+        for (let j = 0; j < n; j++) {
+            const off = j === 0 ? 0 : 3.5 + Math.random() * 4, a = Math.random() * Math.PI * 2;
+            bossFx({ k, x: tp.x + Math.cos(a) * off, z: tp.z + Math.sin(a) * off, r: 3.6, ms: wind + j * 120, dmg: 18 }, coopHost);
+        }
+    }
+}
+function bossSummon(e, n, coopHost) {
+    const bp = e.mesh.position;
+    for (let j = 0; j < n; j++) {
+        const a = Math.random() * Math.PI * 2;
+        let x = bp.x + Math.cos(a) * 6, z = bp.z + Math.sin(a) * 6;
+        if (isPositionInBuilding(x, z, 1.2)) { x = bp.x; z = bp.z; }
+        const bomber = wave >= 10 && j % 3 === 2;
+        const kind = bomber ? 'BOMBER' : 'RUNNER', size = bomber ? 1.3 : 1.2;
+        const hpv = (bomber ? 60 : 100) * (1 + wave * 0.06) * (difficultyMode === 'veteran' ? 1.4 : 1);
+        const mesh = Toon.makeEnemy(kind, size);
+        mesh.position.set(x, size * 0.9, z);
+        scene.add(mesh);
+        Toon.ringPop(new THREE.Vector3(x, 0.2, z), 1.2, BOSS_TELE_COL);
+        createImpact(new THREE.Vector3(x, 0.5, z), 0xd9b796, 10);
+        enemies.push({
+            mesh, hp: hpv, speed: (bomber ? 0.045 : 0.08) * (1 + wave * 0.04), size, behavior: bomber ? 'bomber' : 'normal',
+            name: kind, colorHex: '#ff5a3c', minion: true,
+            strafeDir: Math.random() > 0.5 ? 1 : -1, nextStrafeChange: Date.now() + 1500,
+            shootInterval: 0, bulletSpeed: 0, bulletDamage: 0, bulletRange: 0, preferredDist: 0,
+            lastEnemyShot: Date.now(), hitFlash: 0, lastMeleeHit: 0
+        });
+        if (window.Coop && Coop.active) Coop.onSpawn(enemies[enemies.length - 1]);
+    }
+}
+function bossEnrage(e, ph, coopHost) {
+    e.atk = null; clearBossFx(); if (coopHost) Coop.bossFxSend({ k: 'clear' });
+    e.nextAtk = Date.now() + 1400;
+    const bp = e.mesh.position;
+    createImpact(new THREE.Vector3(bp.x, 1, bp.z), 0xd9b796, 30);
+    Toon.ringPop(new THREE.Vector3(bp.x, 0.2, bp.z), 4, BOSS_TELE_COL);
+    shakeAmount = Math.max(shakeAmount, 0.35);
+    if (window.AudioEngine) AudioEngine.playBossWarning();
+    const ws = document.getElementById('wave-status');
+    if (ws) ws.innerText = ph === 3 ? 'OVERLORD IS FURIOUS' : 'OVERLORD IS ANGRY';
+    bossSummon(e, ph === 2 ? 3 : 4, coopHost);
+    e.nextSummon = Date.now() + 15000;
+}
+
 function spawnEnemy(isBoss) {
     let ex, ez, attempts = 0;
     const _sa = (window.Coop && Coop.active) ? Coop.spawnAnchor() : player.position;
 
     if (isBoss) {
-        const bossHp = 1500 + (wave - 5) * 200;
+        // ~2.5x the old HP (it used to melt faster than a tank), +900 per later boss wave;
+        // co-op scales it again per player (Coop.onSpawn)
+        const bossHp = (4000 + Math.max(0, wave - 5) * 900) * (difficultyMode === 'veteran' ? 1.3 : 1);
         // keep the boss out of the buildings (it could spawn inside one and never come out)
         do {
             const angle  = Math.random() * Math.PI * 2;
@@ -918,7 +1091,7 @@ function spawnEnemy(isBoss) {
             strafeDir: 1, nextStrafeChange: Date.now() + 2000,
             shootInterval: 1200, bulletSpeed: 0.8, bulletDamage: 20,
             bulletRange: 80, preferredDist: 25, lastEnemyShot: Date.now() + 2000,
-            hitFlash: 0, lastMeleeHit: 0
+            hitFlash: 0, lastMeleeHit: 0, atk: null, nextAtk: Date.now() + 2500, nextSummon: 0
         });
         if ((window.Coop && Coop.active)) Coop.onSpawn(enemies[enemies.length - 1]);
         return;
@@ -1359,6 +1532,8 @@ function animate() {
         if (p.life <= 0) { p.active = false; p.mesh.visible = false; }
     });
 
+    updateBossFx();
+
     // Enemy AI (co-op clients only mirror the host's enemies: Coop.clientTick)
     const _coopHost = (window.Coop && Coop.active) && Coop.isHost();
     if ((window.Coop && Coop.active) && Coop.isClient()) Coop.clientTick();
@@ -1410,6 +1585,7 @@ function animate() {
                 spawnDrop(e.mesh.position, true);
                 spawnDrop(e.mesh.position, false);
                 isBossWave = false;
+                clearBossFx(); if (_coopHost) Coop.bossFxSend({ k: 'clear' });
                 const bossBarWrapper = document.getElementById('boss-bar-wrapper');
                 if (bossBarWrapper) bossBarWrapper.style.display = 'none';
                 // (BOSS DOWN is shown by the single callout card; no second banner)
@@ -1465,58 +1641,95 @@ function animate() {
             continue;
         }
 
-        // BOSS behavior
+        // BOSS behavior — OVERLORD: walks, then picks a telegraphed attack
+        // (fan volley, ground slam, charge, rock rain) and summons minions as it
+        // gets angrier. Host-authoritative: telegraphs are broadcast (bossFx) and
+        // every peer checks its own player when a slam/rain lands.
         if (e.behavior === 'boss') {
+            const now = Date.now();
             const hpPct = e.hp / e.maxHp;
-            if      (hpPct > 0.65) e.bossPhase = 1;
-            else if (hpPct > 0.30) e.bossPhase = 2;
-            else                   e.bossPhase = 3;
+            const prevPhase = e.bossPhase || 1;
+            const phNow = hpPct > 0.66 ? 1 : (hpPct > 0.33 ? 2 : 3);
+            e.bossPhase = Math.max(prevPhase, phNow);
+            const ph = e.bossPhase;
+            if (ph > prevPhase) bossEnrage(e, ph, _coopHost);
+            const bp = e.mesh.position;
+            const hd = Math.hypot(_tp.x - bp.x, _tp.z - bp.z);
 
-            const bossSpeed = e.bossPhase === 3 ? 0.22 : (e.bossPhase === 2 ? 0.12 : 0.06);
-            const shootRate = e.bossPhase === 1 ? 1800 : (e.bossPhase === 2 ? 800 : 500);
-
-            let moveX = toP.x * bossSpeed, moveZ = toP.z * bossSpeed;
-            if (e.bossPhase < 3 && distToPlayer < 30) {
-                let sV = new THREE.Vector3(-toP.z, 0, toP.x);
-                moveX += sV.x * e.strafeDir * bossSpeed * 0.5;
-                moveZ += sV.z * e.strafeDir * bossSpeed * 0.5;
-                if (Date.now() > e.nextStrafeChange) {
-                    e.strafeDir *= -1;
-                    e.nextStrafeChange = Date.now() + 1200 + Math.random() * 800;
+            if (!e.atk) {
+                const bossSpeed = [0, 0.075, 0.105, 0.14][ph];
+                let moveX = toP.x * bossSpeed, moveZ = toP.z * bossSpeed;
+                if (hd < 30) {
+                    const sV = new THREE.Vector3(-toP.z, 0, toP.x);
+                    moveX += sV.x * e.strafeDir * bossSpeed * 0.6;
+                    moveZ += sV.z * e.strafeDir * bossSpeed * 0.6;
+                    if (now > e.nextStrafeChange) { e.strafeDir *= -1; e.nextStrafeChange = now + 1200 + Math.random() * 800; }
+                }
+                if (hd > 4.5) enemyStep(e, moveX, moveZ);
+                e.mesh.lookAt(_tp.x, bp.y, _tp.z);
+                if (ph === 3 && now > (e.nextSummon || 0)) {
+                    e.nextSummon = now + 15000;
+                    if (enemies.filter(m => m.minion).length < 6) bossSummon(e, 2, _coopHost);
+                }
+                if (now > e.nextAtk && hd < 60) bossPickAttack(e, ph, hd, _tp, _coopHost);
+            } else {
+                const a = e.atk, t = now - a.t0;
+                if (a.k === 'volley') {
+                    e.mesh.lookAt(_tp.x, bp.y, _tp.z);
+                    if (t >= a.wind + a.fired * 300 && a.fired < a.waves) {
+                        const n = a.count, spread = a.spread, shift = (a.fired % 2) * (spread / (n - 1)) * 0.5;
+                        const base = new THREE.Vector3(_tp.x - bp.x, 0, _tp.z - bp.z).normalize();
+                        for (let s = 0; s < n; s++) {
+                            const ang = -spread / 2 + spread * s / (n - 1) + shift;
+                            const d = new THREE.Vector3(base.x * Math.cos(ang) - base.z * Math.sin(ang), 0, base.x * Math.sin(ang) + base.z * Math.cos(ang));
+                            const eBullet = Toon.makeEnemyBullet(true);
+                            eBullet.position.set(bp.x + d.x * (e.size / 2 + 1.2), bp.y + 0.4, bp.z + d.z * (e.size / 2 + 1.2));
+                            const dist = Math.max(1, Math.hypot(_tp.x - eBullet.position.x, _tp.z - eBullet.position.z));
+                            d.y = (_tp.y - eBullet.position.y) / dist;
+                            d.normalize();
+                            enemyBullets.push({ mesh: eBullet, dir: d, dist: 0, speed: a.speed, damage: a.dmg, range: 75 });
+                            scene.add(eBullet);
+                            if (_coopHost) Coop.ebSpawn(enemyBullets[enemyBullets.length - 1], true);
+                        }
+                        a.fired++;
+                        if (window.AudioEngine) AudioEngine.playShoot(0.55);
+                    }
+                    if (a.fired >= a.waves) bossEndAttack(e, ph, 300);
+                } else if (a.k === 'slam' || a.k === 'rain') {
+                    if (a.k === 'rain') e.mesh.lookAt(_tp.x, bp.y, _tp.z);
+                    if (t >= a.wind + 150) bossEndAttack(e, ph, a.k === 'slam' ? 650 : 250);
+                } else if (a.k === 'charge') {
+                    e.mesh.lookAt(bp.x + a.dir.x, bp.y, bp.z + a.dir.z);
+                    if (t >= a.wind) {
+                        const ox = bp.x, oz = bp.z;
+                        enemyStep(e, a.dir.x * a.speed, a.dir.z * a.speed);
+                        const moved = Math.hypot(bp.x - ox, bp.z - oz);
+                        a.went += moved;
+                        if (now - a.lastDust > 70) { a.lastDust = now; createImpact(new THREE.Vector3(bp.x, 0.3, bp.z), 0xd9b796, 3); }
+                        const hitR = e.size / 2 + 1.3;
+                        if (!a.hitMe && Math.hypot(player.position.x - bp.x, player.position.z - bp.z) < hitR) {
+                            a.hitMe = true;
+                            if (bossHurtLocal(a.dmg)) Sound.hit();
+                        }
+                        if (_coopHost) Coop.hurtNear(bp.x, bp.z, hitR, a.dmg, a.hitSet);
+                        if (moved < a.speed * 0.3 || a.went >= a.len) {
+                            shakeAmount = Math.max(shakeAmount, hd < 20 ? 0.3 : 0.1);
+                            Toon.ringPop(new THREE.Vector3(bp.x, 0.2, bp.z), 2.2, BOSS_TELE_COL);
+                            bossEndAttack(e, ph, 700);   // brief recovery: the window to punish it
+                        }
+                    }
                 }
             }
-            enemyStep(e, moveX, moveZ);
-            e.mesh.lookAt(_tp.x, e.mesh.position.y, _tp.z);
 
-            // Melee (500ms cooldown to avoid per-frame damage)
-            if (distToPlayer < 3.0 && ((_tg && _tg.remote) || !shielded)) {
-                if (!e.lastMeleeHit || Date.now() - e.lastMeleeHit > 500) {
-                    e.lastMeleeHit = Date.now();
-                    const meleeDmg = 15;
+            // Contact punch if you hug it (horizontal distance; the old 3D check never reached)
+            if (!(e.atk && e.atk.k === 'charge') && hd < e.size / 2 + 1.5 && ((_tg && _tg.remote) || !shielded)) {
+                if (!e.lastMeleeHit || now - e.lastMeleeHit > 900) {
+                    e.lastMeleeHit = now;
+                    const meleeDmg = 12 + ph * 3;
                     if (_tg && _tg.remote) Coop.hurtRemote(_tg, meleeDmg);
                     else if (difficultyMode === 'ghost') hp = 0;
                     else { hp -= meleeDmg; waveDamageTaken += meleeDmg; }
-                    if (!(_tg && _tg.remote)) { shakeAmount = 0.2; chromaAmount = 0.8; Sound.hit(); }
-                }
-            }
-
-            // Ranged burst
-            if (distToPlayer <= 60 && Date.now() - e.lastEnemyShot > shootRate) {
-                e.lastEnemyShot = Date.now();
-                const burstSpreads = e.bossPhase === 1 ? [0] : e.bossPhase === 2 ? [-0.2, 0, 0.2] : [-0.3, -0.15, 0, 0.15, 0.3];
-                for (let sp of burstSpreads) {
-                    const eBullet = Toon.makeEnemyBullet(true);
-                    eBullet.position.copy(e.mesh.position);
-                    eBullet.position.y = e.mesh.position.y + 1.5; // eye-level (boss center is at 3.6)
-                    const eDir = _tp.clone().sub(eBullet.position).normalize();
-                    const rotDir = new THREE.Vector3(
-                        eDir.x * Math.cos(sp) - eDir.z * Math.sin(sp),
-                        eDir.y,
-                        eDir.x * Math.sin(sp) + eDir.z * Math.cos(sp)
-                    ).normalize();
-                    enemyBullets.push({ mesh: eBullet, dir: rotDir, dist: 0, speed: 0.85, damage: 20, range: 80 });
-                    scene.add(eBullet);
-                    if (_coopHost) Coop.ebSpawn(enemyBullets[enemyBullets.length - 1], true);
+                    if (!(_tg && _tg.remote)) { damageFlashAmount = 0.6; shakeAmount = 0.2; chromaAmount = 0.8; Sound.hit(); }
                 }
             }
             continue;
@@ -1835,6 +2048,7 @@ function exitToMenu() {
     if (document.pointerLockElement) document.exitPointerLock();
     enemies.forEach(e => disposeMesh(e.mesh)); bullets.forEach(b => disposeMesh(b.mesh));
     enemyBullets.forEach(b => disposeMesh(b.mesh)); drops.forEach(d => disposeMesh(d.mesh));
+    clearBossFx();
     enemies.length = 0; bullets.length = 0; enemyBullets.length = 0; drops.length = 0;
     buildings.length = 0; particles.length = 0; killFeedEntries.length = 0;
     score = 0; wave = 0; enemiesToSpawn = 0; isWaveTransition = false;
