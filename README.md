@@ -7,7 +7,7 @@
 ![Three.js](https://img.shields.io/badge/3D-Three.js%20r128-000000?logo=threedotjs&logoColor=white)
 ![JavaScript](https://img.shields.io/badge/stack-vanilla%20JS-F7DF1E?logo=javascript&logoColor=black)
 ![Co-op](https://img.shields.io/badge/co--op-2%E2%80%934%20players-2EA44F)
-![Status](https://img.shields.io/badge/status-playable%20%C2%B7%20in%20progress-blue)
+![Status](https://img.shields.io/badge/status-playable-blue)
 
 [**Play in your browser**](https://mtarvecha660-lgtm.github.io/Mood-city/) · [Earlier build](https://github.com/mtarvecha660-lgtm/MOOD-SHIFT-CITY)
 
