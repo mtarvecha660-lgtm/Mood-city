@@ -9,6 +9,10 @@
 ![Co-op](https://img.shields.io/badge/co--op-2%E2%80%934%20players-2EA44F)
 ![Status](https://img.shields.io/badge/status-playable-blue)
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="Mood Shift City: Ultra Vis title screen in the browser" width="720">
+</p>
+
 [**Play in your browser**](https://mtarvecha660-lgtm.github.io/Mood-city/) · [Earlier build](https://github.com/mtarvecha660-lgtm/MOOD-SHIFT-CITY)
 
 </div>
